@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Figma play icon (11x14) centered in 24x24 -->
+    <group
+        android:translateX="6.5"
+        android:translateY="5">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M0,14V0L11,7L0,14Z" />
+    </group>
+</vector>

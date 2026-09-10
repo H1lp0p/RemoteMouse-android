@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Figma Tt icon (20x16) centered in 24x24 -->
+    <group
+        android:translateX="2"
+        android:translateY="4">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M5,16V3H0V0H13V3H8V16H5ZM14,16V8H11V5H20V8H17V16H14Z" />
+    </group>
+</vector>

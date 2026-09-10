@@ -59,7 +59,11 @@ class CommandSocket @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
+    private var moveFlushJob: Job? = null
     private val intentionalClose = AtomicBoolean(false)
+    private val moveLock = Any()
+    private var pendingMoveDx = 0
+    private var pendingMoveDy = 0
 
     private val _state = MutableStateFlow(WsConnectionState.Disconnected)
     val state: StateFlow<WsConnectionState> = _state.asStateFlow()
@@ -81,6 +85,7 @@ class CommandSocket @Inject constructor(
 
     fun disconnect() {
         intentionalClose.set(true)
+        stopMoveBatching(sendPending = false)
         heartbeatJob?.cancel()
         heartbeatJob = null
         webSocket?.close(1000, "client disconnect")
@@ -100,29 +105,57 @@ class CommandSocket @Inject constructor(
         },
     )
 
-    fun mouseMove(dx: Int, dy: Int) = sendJson(
-        buildJsonObject {
-            put("type", "mouse_move")
-            put("dx", dx)
-            put("dy", dy)
-        },
-    )
+    /**
+     * Accumulates move deltas and flushes ~every [MOVE_BATCH_INTERVAL_MS].
+     * Call [flushMouseMove] before clicks/scroll so the cursor is up to date.
+     */
+    fun mouseMove(dx: Int, dy: Int) {
+        if (dx == 0 && dy == 0) return
+        synchronized(moveLock) {
+            pendingMoveDx += dx
+            pendingMoveDy += dy
+        }
+        ensureMoveFlushLoop()
+    }
 
-    fun mouseClick(button: String, action: String) = sendJson(
-        buildJsonObject {
-            put("type", "mouse_click")
-            put("button", button)
-            put("action", action)
-        },
-    )
+    fun flushMouseMove() {
+        val (dx, dy) = synchronized(moveLock) {
+            val pair = pendingMoveDx to pendingMoveDy
+            pendingMoveDx = 0
+            pendingMoveDy = 0
+            pair
+        }
+        if (dx == 0 && dy == 0) return
+        sendJson(
+            buildJsonObject {
+                put("type", "mouse_move")
+                put("dx", dx)
+                put("dy", dy)
+            },
+        )
+    }
 
-    fun mouseScroll(deltaY: Int, deltaX: Int = 0) = sendJson(
-        buildJsonObject {
-            put("type", "mouse_scroll")
-            put("delta_x", deltaX)
-            put("delta_y", deltaY)
-        },
-    )
+    fun mouseClick(button: String, action: String): Boolean {
+        flushMouseMove()
+        return sendJson(
+            buildJsonObject {
+                put("type", "mouse_click")
+                put("button", button)
+                put("action", action)
+            },
+        )
+    }
+
+    fun mouseScroll(deltaY: Int, deltaX: Int = 0): Boolean {
+        flushMouseMove()
+        return sendJson(
+            buildJsonObject {
+                put("type", "mouse_scroll")
+                put("delta_x", deltaX)
+                put("delta_y", deltaY)
+            },
+        )
+    }
 
     fun textInput(text: String) = sendJson(
         buildJsonObject {
@@ -188,6 +221,34 @@ class CommandSocket @Inject constructor(
         }
     }
 
+    private fun ensureMoveFlushLoop() {
+        if (moveFlushJob?.isActive == true) return
+        moveFlushJob = scope.launch {
+            while (isActive && _state.value == WsConnectionState.Connected) {
+                delay(MOVE_BATCH_INTERVAL_MS)
+                flushMouseMove()
+                val idle = synchronized(moveLock) {
+                    pendingMoveDx == 0 && pendingMoveDy == 0
+                }
+                if (idle) break
+            }
+            moveFlushJob = null
+        }
+    }
+
+    private fun stopMoveBatching(sendPending: Boolean) {
+        moveFlushJob?.cancel()
+        moveFlushJob = null
+        if (sendPending) {
+            flushMouseMove()
+        } else {
+            synchronized(moveLock) {
+                pendingMoveDx = 0
+                pendingMoveDy = 0
+            }
+        }
+    }
+
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             _state.value = WsConnectionState.Connected
@@ -203,11 +264,13 @@ class CommandSocket @Inject constructor(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            stopMoveBatching(sendPending = false)
             heartbeatJob?.cancel()
             _state.value = WsConnectionState.Disconnected
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            stopMoveBatching(sendPending = false)
             heartbeatJob?.cancel()
             _state.value = WsConnectionState.Disconnected
             if (!intentionalClose.get()) {
@@ -249,5 +312,10 @@ class CommandSocket @Inject constructor(
             }
             else -> _events.emit(ServerEvent.Raw(type, text))
         }
+    }
+
+    companion object {
+        /** Accumulate mouse deltas and flush about once per frame (~16ms). */
+        const val MOVE_BATCH_INTERVAL_MS = 16L
     }
 }
