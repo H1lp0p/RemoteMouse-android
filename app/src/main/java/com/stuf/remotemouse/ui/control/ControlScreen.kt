@@ -35,6 +35,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stuf.remotemouse.R
 import com.stuf.remotemouse.ui.control.mouse.MouseControlPanel
+import com.stuf.remotemouse.ui.control.player.PlayerControlPanel
 import com.stuf.remotemouse.ui.control.stick.StickControlPanel
 
 @Composable
@@ -157,7 +158,16 @@ fun ControlScreen(
                         onRightClick = viewModel::rightClick,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    ControlMode.Player,
+                    ControlMode.Player -> PlayerControlPanel(
+                        media = ui.media,
+                        onPlayPause = viewModel::mediaPlayPause,
+                        onSeekRelative = viewModel::mediaSeekRelative,
+                        onSeekAbsolute = viewModel::mediaSeekAbsolute,
+                        onPrev = viewModel::mediaPrev,
+                        onNext = viewModel::mediaNext,
+                        onOpenActions = { viewModel.setActionsSheetVisible(true) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
                     ControlMode.Text -> ControlModePlaceholder(mode = ui.mode)
                 }
             }

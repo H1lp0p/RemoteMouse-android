@@ -6,6 +6,7 @@ import com.stuf.remotemouse.data.local.repo.ActionRepository
 import com.stuf.remotemouse.data.local.repo.DeviceRepository
 import com.stuf.remotemouse.data.remote.ConnectionOrchestrator
 import com.stuf.remotemouse.data.remote.ServerEvent
+import com.stuf.remotemouse.data.remote.dto.MediaUpdateDto
 import com.stuf.remotemouse.data.remote.dto.VolumeUpdateDto
 import com.stuf.remotemouse.data.settings.AppSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,6 +36,7 @@ data class ControlUiState(
     val showDeviceMenu: Boolean = false,
     val showActionsSheet: Boolean = false,
     val volume: VolumeUpdateDto = VolumeUpdateDto(level = 50, muted = false),
+    val media: MediaUpdateDto? = null,
     val favoriteBusy: Boolean = false,
     val favoriteError: String? = null,
 )
@@ -80,6 +82,8 @@ class ControlViewModel @Inject constructor(
     @Volatile private var stickOx = 0f
     @Volatile private var stickOy = 0f
     private var stickJob: Job? = null
+    private var mediaProgressJob: Job? = null
+    private var mediaSubscribed = false
 
     init {
         viewModelScope.launch {
@@ -95,6 +99,10 @@ class ControlViewModel @Inject constructor(
                     is ServerEvent.VolumeUpdate -> {
                         _ui.update { it.copy(volume = event.data) }
                     }
+                    is ServerEvent.MediaUpdate -> {
+                        _ui.update { it.copy(media = event.data) }
+                        syncMediaProgressTicker()
+                    }
                     else -> Unit
                 }
             }
@@ -105,7 +113,55 @@ class ControlViewModel @Inject constructor(
         if (mode != ControlMode.Stick) {
             onStickReleased()
         }
+        val previous = _ui.value.mode
         _ui.update { it.copy(mode = mode) }
+        if (mode == ControlMode.Player && previous != ControlMode.Player) {
+            subscribeMedia()
+        } else if (previous == ControlMode.Player && mode != ControlMode.Player) {
+            unsubscribeMedia()
+        }
+    }
+
+    private fun subscribeMedia() {
+        if (mediaSubscribed) return
+        mediaSubscribed = true
+        orchestrator.socket().mediaSubscribe()
+        syncMediaProgressTicker()
+    }
+
+    private fun unsubscribeMedia() {
+        if (!mediaSubscribed) return
+        mediaSubscribed = false
+        mediaProgressJob?.cancel()
+        mediaProgressJob = null
+        orchestrator.socket().mediaUnsubscribe()
+    }
+
+    /** Advances position locally while Player is open — no 1s media_update from server. */
+    private fun syncMediaProgressTicker() {
+        mediaProgressJob?.cancel()
+        mediaProgressJob = null
+        if (!mediaSubscribed || _ui.value.mode != ControlMode.Player) return
+        val media = _ui.value.media ?: return
+        if (!media.isPlaying) return
+        mediaProgressJob = viewModelScope.launch {
+            while (isActive) {
+                delay(1_000)
+                val current = _ui.value.media ?: break
+                if (!current.isPlaying) break
+                val duration = current.durationSeconds.coerceAtLeast(0)
+                if (current.positionSeconds >= duration) {
+                    _ui.update {
+                        it.copy(media = current.copy(isPlaying = false, positionSeconds = duration))
+                    }
+                    break
+                }
+                _ui.update {
+                    it.copy(media = current.copy(positionSeconds = current.positionSeconds + 1))
+                }
+            }
+            mediaProgressJob = null
+        }
     }
 
     fun setDeviceMenuVisible(visible: Boolean) {
@@ -201,6 +257,39 @@ class ControlViewModel @Inject constructor(
         orchestrator.socket().volumeSet(clamped)
     }
 
+    fun mediaPlayPause() {
+        orchestrator.socket().mediaPlayPause()
+        val current = _ui.value.media ?: return
+        _ui.update { it.copy(media = current.copy(isPlaying = !current.isPlaying)) }
+        syncMediaProgressTicker()
+    }
+
+    fun mediaPrev() = orchestrator.socket().mediaPrev()
+
+    fun mediaNext() = orchestrator.socket().mediaNext()
+
+    fun mediaSeekRelative(seconds: Int) {
+        if (seconds == 0) return
+        orchestrator.socket().mediaSeek(seconds)
+        val current = _ui.value.media ?: return
+        val duration = current.durationSeconds.coerceAtLeast(0)
+        val nextPos = (current.positionSeconds + seconds).coerceIn(0, duration)
+        _ui.update { it.copy(media = current.copy(positionSeconds = nextPos)) }
+    }
+
+    fun mediaSeekAbsolute(positionSeconds: Int) {
+        val current = _ui.value.media
+        val duration = current?.durationSeconds?.coerceAtLeast(0) ?: 0
+        val target = positionSeconds.coerceIn(0, duration.coerceAtLeast(0))
+        val delta = target - (current?.positionSeconds ?: 0)
+        if (delta != 0) {
+            orchestrator.socket().mediaSeek(delta)
+        }
+        if (current != null) {
+            _ui.update { it.copy(media = current.copy(positionSeconds = target)) }
+        }
+    }
+
     fun runAction(actionId: Long) {
         viewModelScope.launch {
             val withSteps = actionRepository.getActionWithSteps(actionId) ?: return@launch
@@ -232,6 +321,7 @@ class ControlViewModel @Inject constructor(
     }
 
     fun disconnect() {
+        unsubscribeMedia()
         releaseHeldButtons()
         orchestrator.disconnect()
     }
@@ -247,6 +337,7 @@ class ControlViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        unsubscribeMedia()
         onStickReleased()
         releaseHeldButtons()
         super.onCleared()

@@ -65,10 +65,61 @@ class StubState:
     active_ws: set[WebSocket] = field(default_factory=set)
     # client_id of last successfully paired peer (for save without auth token)
     last_paired: dict[str, dict[str, Any]] = field(default_factory=dict)
+    media_title: str = '[Youtube] "I created the most strange android app"'
+    media_artist: str = "Code-bullet"
+    media_position: int = 839  # 13:59
+    media_duration: int = 2595  # 43:15
+    media_playing: bool = True
+    media_can_seek: bool = True
+    volume_level: int = 50
+    volume_muted: bool = False
 
 
 state = StubState()
 udp_transport: asyncio.DatagramTransport | None = None
+media_subscribers: set[WebSocket] = set()
+_media_anchor_t: float = time.time()
+_media_anchor_pos: int = state.media_position
+
+
+def _effective_media_position() -> int:
+    if state.media_playing:
+        elapsed = int(time.time() - _media_anchor_t)
+        return min(state.media_duration, max(0, _media_anchor_pos + elapsed))
+    return state.media_position
+
+
+def _commit_media_position(position: int | None = None, playing: bool | None = None) -> None:
+    global _media_anchor_t, _media_anchor_pos
+    pos = _effective_media_position() if position is None else position
+    state.media_position = max(0, min(state.media_duration, pos))
+    _media_anchor_pos = state.media_position
+    _media_anchor_t = time.time()
+    if playing is not None:
+        state.media_playing = playing
+
+
+def media_update_payload() -> dict[str, Any]:
+    state.media_position = _effective_media_position()
+    if state.media_playing and state.media_position >= state.media_duration:
+        _commit_media_position(state.media_duration, playing=False)
+    return {
+        "type": "media_update",
+        "title": state.media_title,
+        "artist": state.media_artist,
+        "position_seconds": state.media_position,
+        "duration_seconds": state.media_duration,
+        "is_playing": state.media_playing,
+        "can_seek": state.media_can_seek,
+    }
+
+
+def volume_update_payload() -> dict[str, Any]:
+    return {
+        "type": "volume_update",
+        "level": state.volume_level,
+        "muted": state.volume_muted,
+    }
 
 
 class UdpDiscoveryProtocol(asyncio.DatagramProtocol):
@@ -265,6 +316,10 @@ async def websocket_endpoint(ws: WebSocket):
     peer = ws.client.host if ws.client else "?"
     state.active_ws.add(ws)
     log("WS  ", "IN ", peer, {"event": "connected"})
+    # Volume only; media is pushed on media_subscribe while Player is open.
+    vol = volume_update_payload()
+    await ws.send_text(json.dumps(vol))
+    log("WS  ", "OUT", peer, vol)
     try:
         while True:
             raw = await ws.receive_text()
@@ -305,12 +360,65 @@ async def websocket_endpoint(ws: WebSocket):
                 await ws.send_text(json.dumps(out))
                 log("WS  ", "OUT", peer, out)
                 print(f"[TRUST] saved client_id={client_id} name={client_name}", flush=True)
+            elif msg_type == "media_subscribe":
+                media_subscribers.add(ws)
+                out = media_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+            elif msg_type == "media_unsubscribe":
+                media_subscribers.discard(ws)
+                log("WS  ", "OK ", peer, {"media_unsubscribe": True})
+            elif msg_type == "media_play_pause":
+                _commit_media_position(playing=not state.media_playing)
+                out = media_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+            elif msg_type == "media_next":
+                state.media_title = '[Youtube] "Next track from stub"'
+                state.media_artist = "Stub Artist"
+                state.media_duration = 2595
+                _commit_media_position(0, playing=True)
+                out = media_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+            elif msg_type == "media_prev":
+                state.media_title = '[Youtube] "I created the most strange android app"'
+                state.media_artist = "Code-bullet"
+                state.media_duration = 2595
+                _commit_media_position(0, playing=True)
+                out = media_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+            elif msg_type == "media_seek":
+                delta = int(message.get("seconds") or 0)
+                _commit_media_position(_effective_media_position() + delta)
+                out = media_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+            elif msg_type == "volume_set":
+                state.volume_level = max(0, min(100, int(message.get("level") or 0)))
+                state.volume_muted = False
+                out = volume_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+            elif msg_type == "volume_step":
+                step = 5 if message.get("direction") == "up" else -5
+                state.volume_level = max(0, min(100, state.volume_level + step))
+                out = volume_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+            elif msg_type == "volume_mute":
+                state.volume_muted = bool(message.get("mute"))
+                out = volume_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
             else:
                 # Acknowledge other commands for observability; no-op on input emulation.
                 log("WS  ", "OK ", peer, {"accepted": msg_type})
     except WebSocketDisconnect:
         log("WS  ", "IN ", peer, {"event": "disconnected"})
     finally:
+        media_subscribers.discard(ws)
         state.active_ws.discard(ws)
 
 

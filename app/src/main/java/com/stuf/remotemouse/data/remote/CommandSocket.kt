@@ -215,6 +215,9 @@ class CommandSocket @Inject constructor(
         },
     )
 
+    fun mediaSubscribe() = sendJson(buildJsonObject { put("type", "media_subscribe") })
+    fun mediaUnsubscribe() = sendJson(buildJsonObject { put("type", "media_unsubscribe") })
+
     fun heartbeat(timestamp: Long = System.currentTimeMillis()) = sendJson(
         buildJsonObject {
             put("type", "heartbeat")

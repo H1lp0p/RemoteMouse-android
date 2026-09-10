@@ -42,4 +42,11 @@
     <string name="control_mode_player">Player</string>
     <string name="control_mode_text">Text</string>
     <string name="control_mode_coming_soon">%1$s — soon</string>
+    <string name="media_no_data">//No Data//</string>
+    <string name="media_by_artist">By %1$s</string>
+    <string name="media_play_pause">Play / Pause</string>
+    <string name="media_rewind">Rewind</string>
+    <string name="media_forward">Forward</string>
+    <string name="media_prev">Previous</string>
+    <string name="media_next">Next</string>
 </resources>
