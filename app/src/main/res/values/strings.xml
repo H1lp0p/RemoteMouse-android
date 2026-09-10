@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Remote Mouse</string>
+    <string name="remote_app_title">Remote Mouse</string>
+    <string name="favorite_devices">Favorite</string>
+    <string name="found_in_network">Found in network</string>
+    <string name="device_list_empty">empty</string>
+    <string name="device_list_empty_hint">add device to list</string>
+    <string name="add_device">Add device</string>
+    <string name="expand_section">Expand</string>
+    <string name="collapse_section">Collapse</string>
+    <string name="connect">Connect</string>
+    <string name="enter_code">Enter code</string>
+    <string name="saved">Saved</string>
+    <string name="not_available">Not available</string>
+    <string name="available">Available</string>
+    <string name="pairing">Connecting…</string>
+    <string name="connecting_to">Connecting to</string>
+    <string name="retry">Retry</string>
+    <string name="back">Back</string>
+    <string name="verification_code">Verification code</string>
+    <string name="qr_code">QR-code</string>
+    <string name="device_name_fallback">Device</string>
+    <string name="device_menu">Device menu</string>
+    <string name="add_to_favorite">Add to favorite</string>
+    <string name="remove_from_favorite">Remove from favorite</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="edit_actions">Edit actions</string>
+    <string name="actions">Actions</string>
+    <string name="play_action">Play action</string>
+    <string name="edit">Edit</string>
+    <string name="no_actions">No actions yet</string>
+    <string name="lmb">LMB</string>
+    <string name="rmb">RMB</string>
+    <string name="touchpad_hints">Swipe = move\nHold + swipe = scroll\nSingle tap = LMB\nDouble tap = RMB</string>
+    <string name="control_mode_mouse">Mouse</string>
+    <string name="control_mode_stick">Stick</string>
+    <string name="control_mode_player">Player</string>
+    <string name="control_mode_text">Text</string>
+    <string name="control_mode_coming_soon">%1$s — soon</string>
+</resources>
