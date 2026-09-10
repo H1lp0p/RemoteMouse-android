@@ -2,7 +2,6 @@ package com.stuf.remotemouse.ui.control
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.stuf.remotemouse.data.local.entity.ActionEntity
 import com.stuf.remotemouse.data.local.repo.ActionRepository
 import com.stuf.remotemouse.data.local.repo.DeviceRepository
 import com.stuf.remotemouse.data.remote.ConnectionOrchestrator
@@ -12,6 +11,8 @@ import com.stuf.remotemouse.data.settings.AppSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -20,8 +21,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class ControlUiState(
@@ -49,15 +52,34 @@ class ControlViewModel @Inject constructor(
     private val _ui = MutableStateFlow(ControlUiState())
     val ui: StateFlow<ControlUiState> = _ui.asStateFlow()
 
-    val actions: StateFlow<List<ActionEntity>> = session
+    val actions: StateFlow<List<ActionListItem>> = session
         .map { it?.deviceId }
         .flatMapLatest { id ->
-            if (id == null) flowOf(emptyList()) else actionRepository.observeActions(id)
+            if (id == null) {
+                flowOf(emptyList())
+            } else {
+                actionRepository.observeActions(id).mapLatest { list ->
+                    list.map { action ->
+                        val steps = actionRepository.getActionWithSteps(action.id)?.steps.orEmpty()
+                        ActionListItem(
+                            id = action.id,
+                            name = action.name,
+                            subtitle = steps.joinToString(" + ") { step ->
+                                step.name.ifBlank { step.stepStringCode }
+                            },
+                        )
+                    }
+                }
+            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val sensitivity = appSettings.touchpadSensitivity
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 1.2f)
+
+    @Volatile private var stickOx = 0f
+    @Volatile private var stickOy = 0f
+    private var stickJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -80,6 +102,9 @@ class ControlViewModel @Inject constructor(
     }
 
     fun selectMode(mode: ControlMode) {
+        if (mode != ControlMode.Stick) {
+            onStickReleased()
+        }
         _ui.update { it.copy(mode = mode) }
     }
 
@@ -100,9 +125,51 @@ class ControlViewModel @Inject constructor(
     }
 
     fun onScroll(deltaY: Float) {
+        onScroll(deltaX = 0f, deltaY = deltaY)
+    }
+
+    fun onScroll(deltaX: Float, deltaY: Float) {
+        val dx = deltaX.toInt().coerceIn(-240, 240)
         val dy = (-deltaY).toInt().coerceIn(-240, 240)
-        if (dy == 0) return
-        orchestrator.socket().mouseScroll(dy)
+        if (dx == 0 && dy == 0) return
+        orchestrator.socket().mouseScroll(deltaY = dy, deltaX = dx)
+    }
+
+    /**
+     * Stick move: cursor velocity comes from offset vs pad center, not finger deltas.
+     */
+    fun onStickDeflection(ox: Float, oy: Float) {
+        stickOx = ox
+        stickOy = oy
+        ensureStickLoop()
+    }
+
+    fun onStickReleased() {
+        stickOx = 0f
+        stickOy = 0f
+        stickJob?.cancel()
+        stickJob = null
+        orchestrator.socket().setMouseMoveVelocity(0, 0)
+    }
+
+    private fun ensureStickLoop() {
+        if (stickJob?.isActive == true) return
+        stickJob = viewModelScope.launch {
+            while (isActive) {
+                val ox = stickOx
+                val oy = stickOy
+                if (ox == 0f && oy == 0f) break
+                val sens = sensitivity.value
+                // Full deflection (~120–150px) → ~15–25px cursor / 16ms tick
+                val scale = 0.14f * sens
+                val ix = (ox * scale).toInt()
+                val iy = (oy * scale).toInt()
+                orchestrator.socket().setMouseMoveVelocity(ix, iy)
+                delay(16)
+            }
+            orchestrator.socket().setMouseMoveVelocity(0, 0)
+            stickJob = null
+        }
     }
 
     fun leftClick() = orchestrator.socket().mouseClick("left", "click")
@@ -180,6 +247,7 @@ class ControlViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        onStickReleased()
         releaseHeldButtons()
         super.onCleared()
     }

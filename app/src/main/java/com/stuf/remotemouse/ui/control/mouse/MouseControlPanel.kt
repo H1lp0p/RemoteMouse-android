@@ -54,7 +54,7 @@ fun MouseControlPanel(
                 Text(
                     text = stringResource(R.string.actions),
                     style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSecondary,
                 )
             }
         }
@@ -81,7 +81,7 @@ fun MouseControlPanel(
                 Text(
                     text = stringResource(R.string.touchpad_hints),
                     style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSecondary,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -127,7 +127,7 @@ private fun MouseButtonToggle(
             .fillMaxSize()
             .background(
                 color = if (held) {
-                    MaterialTheme.colorScheme.primaryContainer
+                    MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.surfaceContainer
                 },
@@ -137,12 +137,12 @@ private fun MouseButtonToggle(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = label,
+            text = if (held) ">$label<" else label,
             style = MaterialTheme.typography.headlineSmall,
             color = if (held) {
-                MaterialTheme.colorScheme.onPrimaryContainer
+                MaterialTheme.colorScheme.onPrimary
             } else {
-                MaterialTheme.colorScheme.onSurface
+                MaterialTheme.colorScheme.onSecondary
             },
         )
     }

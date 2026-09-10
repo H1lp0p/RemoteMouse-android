@@ -118,6 +118,17 @@ class CommandSocket @Inject constructor(
         ensureMoveFlushLoop()
     }
 
+    /** Replaces the pending move vector (used by stick velocity from center). */
+    fun setMouseMoveVelocity(dx: Int, dy: Int) {
+        synchronized(moveLock) {
+            pendingMoveDx = dx
+            pendingMoveDy = dy
+        }
+        if (dx != 0 || dy != 0) {
+            ensureMoveFlushLoop()
+        }
+    }
+
     fun flushMouseMove() {
         val (dx, dy) = synchronized(moveLock) {
             val pair = pendingMoveDx to pendingMoveDy

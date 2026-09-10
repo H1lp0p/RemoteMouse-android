@@ -30,9 +30,13 @@
     <string name="play_action">Play action</string>
     <string name="edit">Edit</string>
     <string name="no_actions">No actions yet</string>
+    <string name="volume">Volume</string>
+    <string name="run_action">Run action</string>
     <string name="lmb">LMB</string>
     <string name="rmb">RMB</string>
     <string name="touchpad_hints">Swipe = move\nHold + swipe = scroll\nSingle tap = LMB\nDouble tap = RMB</string>
+    <string name="stick_hint_top">Swipe = move\nHold + swipe = scroll</string>
+    <string name="stick_hint_bottom">Single tap = LMB\nDouble tap = RMB</string>
     <string name="control_mode_mouse">Mouse</string>
     <string name="control_mode_stick">Stick</string>
     <string name="control_mode_player">Player</string>

@@ -35,6 +35,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stuf.remotemouse.R
 import com.stuf.remotemouse.ui.control.mouse.MouseControlPanel
+import com.stuf.remotemouse.ui.control.stick.StickControlPanel
 
 @Composable
 fun ControlScreen(
@@ -143,7 +144,19 @@ fun ControlScreen(
                         onOpenActions = { viewModel.setActionsSheetVisible(true) },
                         modifier = Modifier.fillMaxSize(),
                     )
-                    ControlMode.Stick,
+                    ControlMode.Stick -> StickControlPanel(
+                        leftHeld = ui.leftHeld,
+                        rightHeld = ui.rightHeld,
+                        onToggleLeft = viewModel::toggleLeftButton,
+                        onToggleRight = viewModel::toggleRightButton,
+                        onOpenActions = { viewModel.setActionsSheetVisible(true) },
+                        onStickDeflection = viewModel::onStickDeflection,
+                        onStickReleased = viewModel::onStickReleased,
+                        onScroll = { dx, dy -> viewModel.onScroll(dx, dy) },
+                        onLeftClick = viewModel::leftClick,
+                        onRightClick = viewModel::rightClick,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                     ControlMode.Player,
                     ControlMode.Text -> ControlModePlaceholder(mode = ui.mode)
                 }
