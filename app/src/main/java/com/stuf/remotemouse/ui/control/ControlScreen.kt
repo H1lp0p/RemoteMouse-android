@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,7 +23,6 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,6 +37,7 @@ import com.stuf.remotemouse.R
 import com.stuf.remotemouse.ui.control.mouse.MouseControlPanel
 import com.stuf.remotemouse.ui.control.player.PlayerControlPanel
 import com.stuf.remotemouse.ui.control.stick.StickControlPanel
+import com.stuf.remotemouse.ui.control.text.TextControlPanel
 
 @Composable
 fun ControlScreen(
@@ -55,6 +56,7 @@ fun ControlScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -72,6 +74,13 @@ fun ControlScreen(
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = ui.pingMs?.let { stringResource(R.string.control_ping_ms, it) }
+                        ?: stringResource(R.string.control_ping_unknown),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondary,
+                    modifier = Modifier.padding(end = 8.dp),
                 )
                 Box {
                     OutlinedIconButton(
@@ -168,7 +177,11 @@ fun ControlScreen(
                         onOpenActions = { viewModel.setActionsSheetVisible(true) },
                         modifier = Modifier.fillMaxSize(),
                     )
-                    ControlMode.Text -> ControlModePlaceholder(mode = ui.mode)
+                    ControlMode.Text -> TextControlPanel(
+                        text = ui.sharedText,
+                        onTextChange = viewModel::onSharedTextChange,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
             }
         }
@@ -217,23 +230,6 @@ private fun ControlModeChips(
                     selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
                 ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun ControlModePlaceholder(mode: ControlMode) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = stringResource(R.string.control_mode_coming_soon, mode.label()),
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

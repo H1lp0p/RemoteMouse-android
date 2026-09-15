@@ -19,6 +19,8 @@ import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+import mouse_win
+
 PORT = 12345
 DEVICE_NAME = "Python Stub PC"
 MAX_CLIENTS = 5
@@ -32,6 +34,15 @@ def log(kind: str, direction: str, peer: str, payload: Any) -> None:
     else:
         body = str(payload)
     print(f"[{kind}] {direction} {peer} {body}", flush=True)
+
+
+async def apply_mouse(handler: Any, *args: Any, peer: str, detail: dict[str, Any]) -> None:
+    """Run mouse emulation off the event loop; log success/failure."""
+    try:
+        await asyncio.to_thread(handler, *args)
+        log("MOUSE", "OK ", peer, detail)
+    except Exception as exc:
+        log("MOUSE", "ERR", peer, {**detail, "error": str(exc)})
 
 
 def local_ip() -> str:
@@ -73,11 +84,13 @@ class StubState:
     media_can_seek: bool = True
     volume_level: int = 50
     volume_muted: bool = False
+    text_field: str = ""
 
 
 state = StubState()
 udp_transport: asyncio.DatagramTransport | None = None
 media_subscribers: set[WebSocket] = set()
+text_subscribers: set[WebSocket] = set()
 _media_anchor_t: float = time.time()
 _media_anchor_pos: int = state.media_position
 
@@ -120,6 +133,31 @@ def volume_update_payload() -> dict[str, Any]:
         "level": state.volume_level,
         "muted": state.volume_muted,
     }
+
+
+def text_update_payload() -> dict[str, Any]:
+    return {
+        "type": "text_update",
+        "text": state.text_field,
+    }
+
+
+async def broadcast_text_update(exclude: WebSocket | None = None) -> None:
+    payload = text_update_payload()
+    raw = json.dumps(payload)
+    dead: list[WebSocket] = []
+    for peer_ws in list(text_subscribers):
+        if exclude is not None and peer_ws is exclude:
+            continue
+        peer = peer_ws.client.host if peer_ws.client else "?"
+        try:
+            await peer_ws.send_text(raw)
+            log("WS  ", "OUT", peer, payload)
+        except Exception:
+            dead.append(peer_ws)
+    for peer_ws in dead:
+        text_subscribers.discard(peer_ws)
+        state.active_ws.discard(peer_ws)
 
 
 class UdpDiscoveryProtocol(asyncio.DatagramProtocol):
@@ -199,6 +237,10 @@ async def lifespan(app: FastAPI):
     print(f"  UDP port   : {PORT}", flush=True)
     print(f"  device_id  : {state.device_id}", flush=True)
     print(f"  CODE       : {state.verification_code}", flush=True)
+    if mouse_win.is_available():
+        print("  Mouse emu  : ON (Win32 SendInput)", flush=True)
+    else:
+        print("  Mouse emu  : OFF (non-Windows host)", flush=True)
     print("Open the debug connect screen on the phone and tap Search.", flush=True)
     print("=" * 60, flush=True)
     try:
@@ -412,6 +454,76 @@ async def websocket_endpoint(ws: WebSocket):
                 out = volume_update_payload()
                 await ws.send_text(json.dumps(out))
                 log("WS  ", "OUT", peer, out)
+            elif msg_type == "text_subscribe":
+                text_subscribers.add(ws)
+                out = text_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+            elif msg_type == "text_unsubscribe":
+                text_subscribers.discard(ws)
+                log("WS  ", "OK ", peer, {"text_unsubscribe": True})
+            elif msg_type in ("text_set", "text_input"):
+                state.text_field = str(message.get("text") or "")
+                # Echo to sender + other Text-control subscribers for sync.
+                out = text_update_payload()
+                await ws.send_text(json.dumps(out))
+                log("WS  ", "OUT", peer, out)
+                await broadcast_text_update(exclude=ws)
+            elif msg_type == "mouse_move":
+                dx = int(message.get("dx") or 0)
+                dy = int(message.get("dy") or 0)
+                info: dict[str, Any] = {"accepted": "mouse_move", "dx": dx, "dy": dy}
+                # Real RTT is measured on the phone (same clock); stub only prints the
+                # previous sample piggybacked as prev_rtt_ms. Do NOT use stub_now - client_ts.
+                prev_rtt = message.get("prev_rtt_ms")
+                if prev_rtt is not None:
+                    try:
+                        info["rtt_ms"] = int(prev_rtt)
+                    except (TypeError, ValueError):
+                        info["prev_rtt_invalid"] = prev_rtt
+                log("WS  ", "OK ", peer, info)
+                await apply_mouse(
+                    mouse_win.move_relative,
+                    dx,
+                    dy,
+                    peer=peer,
+                    detail={"op": "move", "dx": dx, "dy": dy},
+                )
+                ts = message.get("timestamp")
+                if ts is not None:
+                    try:
+                        ack = {"type": "mouse_move_ack", "timestamp": int(ts)}
+                        await ws.send_text(json.dumps(ack))
+                        log("WS  ", "OUT", peer, ack)
+                    except (TypeError, ValueError):
+                        pass
+            elif msg_type == "mouse_click":
+                button = str(message.get("button") or "left")
+                action = str(message.get("action") or "click")
+                log("WS  ", "OK ", peer, {"accepted": "mouse_click", "button": button, "action": action})
+                await apply_mouse(
+                    mouse_win.button,
+                    button,
+                    action,
+                    peer=peer,
+                    detail={"op": "click", "button": button, "action": action},
+                )
+            elif msg_type == "mouse_scroll":
+                delta_y = int(message.get("delta_y") or 0)
+                delta_x = int(message.get("delta_x") or 0)
+                log(
+                    "WS  ",
+                    "OK ",
+                    peer,
+                    {"accepted": "mouse_scroll", "delta_x": delta_x, "delta_y": delta_y},
+                )
+                await apply_mouse(
+                    mouse_win.scroll,
+                    delta_y,
+                    delta_x,
+                    peer=peer,
+                    detail={"op": "scroll", "delta_x": delta_x, "delta_y": delta_y},
+                )
             else:
                 # Acknowledge other commands for observability; no-op on input emulation.
                 log("WS  ", "OK ", peer, {"accepted": msg_type})
@@ -419,6 +531,7 @@ async def websocket_endpoint(ws: WebSocket):
         log("WS  ", "IN ", peer, {"event": "disconnected"})
     finally:
         media_subscribers.discard(ws)
+        text_subscribers.discard(ws)
         state.active_ws.discard(ws)
 
 

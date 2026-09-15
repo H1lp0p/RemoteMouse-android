@@ -25,7 +25,6 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun RemoteMouseTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Material You dynamic color on Android 12+
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {

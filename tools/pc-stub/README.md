@@ -22,5 +22,7 @@ Allow **TCP/UDP 12345** in Windows Firewall for private networks.
 - UDP discovery on port `12345`
 - `GET /status`, `POST /pair`
 - WebSocket `/ws` (`heartbeat`, `save`, and logs all other commands)
+- **Virtual mouse** on Windows via `SendInput`: `mouse_move`, `mouse_click`, `mouse_scroll`
+  (keyboard / text are still no-op)
 
 Phone and PC must be on the same Wi‑Fi.

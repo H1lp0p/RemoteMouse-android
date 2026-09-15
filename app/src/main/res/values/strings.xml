@@ -49,4 +49,7 @@
     <string name="media_forward">Forward</string>
     <string name="media_prev">Previous</string>
     <string name="media_next">Next</string>
+    <string name="text_input_placeholder">Input...</string>
+    <string name="control_ping_ms">%1$d ms</string>
+    <string name="control_ping_unknown">— ms</string>
 </resources>

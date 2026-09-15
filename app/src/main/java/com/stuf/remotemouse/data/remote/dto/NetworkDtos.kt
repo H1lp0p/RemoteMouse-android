@@ -91,6 +91,12 @@ data class VolumeUpdateDto(
 )
 
 @Serializable
+data class TextUpdateDto(
+    val type: String = "text_update",
+    val text: String = "",
+)
+
+@Serializable
 data class ContextChangeDto(
     val type: String = "context_change",
     val context: String,

@@ -95,6 +95,7 @@ class DebugConnectViewModel @Inject constructor(
                     is ServerEvent.ContextChange -> appendLog("context: ${event.context}")
                     is ServerEvent.MediaUpdate -> appendLog("media_update")
                     is ServerEvent.VolumeUpdate -> appendLog("volume_update")
+                    is ServerEvent.TextUpdate -> appendLog("text_update (${event.text.length} chars)")
                     is ServerEvent.Raw -> appendLog("raw: ${event.type}")
                 }
             }

@@ -37,6 +37,8 @@ data class ControlUiState(
     val showActionsSheet: Boolean = false,
     val volume: VolumeUpdateDto = VolumeUpdateDto(level = 50, muted = false),
     val media: MediaUpdateDto? = null,
+    val sharedText: String = "",
+    val pingMs: Long? = null,
     val favoriteBusy: Boolean = false,
     val favoriteError: String? = null,
 )
@@ -84,6 +86,9 @@ class ControlViewModel @Inject constructor(
     private var stickJob: Job? = null
     private var mediaProgressJob: Job? = null
     private var mediaSubscribed = false
+    private var textSubscribed = false
+    private var textSyncJob: Job? = null
+    private var lastSentText: String? = null
 
     init {
         viewModelScope.launch {
@@ -103,6 +108,19 @@ class ControlViewModel @Inject constructor(
                         _ui.update { it.copy(media = event.data) }
                         syncMediaProgressTicker()
                     }
+                    is ServerEvent.TextUpdate -> {
+                        if (event.text != _ui.value.sharedText && event.text != lastSentText) {
+                            _ui.update { it.copy(sharedText = event.text) }
+                        }
+                    }
+                    is ServerEvent.HeartbeatAck -> {
+                        val rtt = event.timestamp?.let { sentAt ->
+                            (System.currentTimeMillis() - sentAt).coerceAtLeast(0L)
+                        }
+                        if (rtt != null) {
+                            _ui.update { it.copy(pingMs = rtt) }
+                        }
+                    }
                     else -> Unit
                 }
             }
@@ -120,6 +138,11 @@ class ControlViewModel @Inject constructor(
         } else if (previous == ControlMode.Player && mode != ControlMode.Player) {
             unsubscribeMedia()
         }
+        if (mode == ControlMode.Text && previous != ControlMode.Text) {
+            subscribeText()
+        } else if (previous == ControlMode.Text && mode != ControlMode.Text) {
+            unsubscribeText()
+        }
     }
 
     private fun subscribeMedia() {
@@ -135,6 +158,41 @@ class ControlViewModel @Inject constructor(
         mediaProgressJob?.cancel()
         mediaProgressJob = null
         orchestrator.socket().mediaUnsubscribe()
+    }
+
+    private fun subscribeText() {
+        if (textSubscribed) return
+        textSubscribed = true
+        orchestrator.socket().textSubscribe()
+    }
+
+    private fun unsubscribeText() {
+        if (!textSubscribed) return
+        textSubscribed = false
+        textSyncJob?.cancel()
+        textSyncJob = null
+        flushSharedText()
+        orchestrator.socket().textUnsubscribe()
+    }
+
+    fun onSharedTextChange(text: String) {
+        _ui.update { it.copy(sharedText = text) }
+        textSyncJob?.cancel()
+        textSyncJob = viewModelScope.launch {
+            delay(120)
+            lastSentText = text
+            orchestrator.socket().textSet(text)
+        }
+    }
+
+    private fun flushSharedText() {
+        textSyncJob?.cancel()
+        textSyncJob = null
+        val text = _ui.value.sharedText
+        if (lastSentText != text) {
+            lastSentText = text
+            orchestrator.socket().textSet(text)
+        }
     }
 
     /** Advances position locally while Player is open — no 1s media_update from server. */
@@ -322,6 +380,7 @@ class ControlViewModel @Inject constructor(
 
     fun disconnect() {
         unsubscribeMedia()
+        unsubscribeText()
         releaseHeldButtons()
         orchestrator.disconnect()
     }
@@ -338,6 +397,7 @@ class ControlViewModel @Inject constructor(
 
     override fun onCleared() {
         unsubscribeMedia()
+        unsubscribeText()
         onStickReleased()
         releaseHeldButtons()
         super.onCleared()

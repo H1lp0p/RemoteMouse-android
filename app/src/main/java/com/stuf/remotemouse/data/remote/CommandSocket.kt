@@ -3,6 +3,7 @@ package com.stuf.remotemouse.data.remote
 import com.stuf.remotemouse.data.remote.dto.ContextChangeDto
 import com.stuf.remotemouse.data.remote.dto.MediaUpdateDto
 import com.stuf.remotemouse.data.remote.dto.SaveSuccessDto
+import com.stuf.remotemouse.data.remote.dto.TextUpdateDto
 import com.stuf.remotemouse.data.remote.dto.VolumeUpdateDto
 import com.stuf.remotemouse.data.remote.dto.WsErrorDto
 import java.util.concurrent.atomic.AtomicBoolean
@@ -40,6 +41,7 @@ sealed interface ServerEvent {
     data class ContextChange(val context: String) : ServerEvent
     data class MediaUpdate(val data: MediaUpdateDto) : ServerEvent
     data class VolumeUpdate(val data: VolumeUpdateDto) : ServerEvent
+    data class TextUpdate(val text: String) : ServerEvent
     data class HeartbeatAck(val timestamp: Long?) : ServerEvent
     data class Error(val code: Int, val message: String) : ServerEvent
     data class Raw(val type: String, val json: String) : ServerEvent
@@ -64,6 +66,8 @@ class CommandSocket @Inject constructor(
     private val moveLock = Any()
     private var pendingMoveDx = 0
     private var pendingMoveDy = 0
+    /** Last mouse_move RTT (ms) measured on this device via mouse_move_ack. Debug only. */
+    @Volatile private var lastMouseMoveRttMs: Long? = null
 
     private val _state = MutableStateFlow(WsConnectionState.Disconnected)
     val state: StateFlow<WsConnectionState> = _state.asStateFlow()
@@ -142,6 +146,11 @@ class CommandSocket @Inject constructor(
                 put("type", "mouse_move")
                 put("dx", dx)
                 put("dy", dy)
+                // Not in AsyncAPI — debug only; strip by flipping [DEBUG_MOUSE_MOVE_LATENCY].
+                if (DEBUG_MOUSE_MOVE_LATENCY) {
+                    put("timestamp", System.currentTimeMillis())
+                    lastMouseMoveRttMs?.let { put("prev_rtt_ms", it) }
+                }
             },
         )
     }
@@ -174,6 +183,17 @@ class CommandSocket @Inject constructor(
             put("text", text)
         },
     )
+
+    /** Full shared text-field sync (Text control). */
+    fun textSet(text: String) = sendJson(
+        buildJsonObject {
+            put("type", "text_set")
+            put("text", text)
+        },
+    )
+
+    fun textSubscribe() = sendJson(buildJsonObject { put("type", "text_subscribe") })
+    fun textUnsubscribe() = sendJson(buildJsonObject { put("type", "text_unsubscribe") })
 
     fun keySequence(keys: List<Int>) = sendJson(
         buildJsonObject {
@@ -316,9 +336,19 @@ class CommandSocket @Inject constructor(
                 val dto = json.decodeFromJsonElement(VolumeUpdateDto.serializer(), obj)
                 _events.emit(ServerEvent.VolumeUpdate(dto))
             }
+            "text_update" -> {
+                val dto = json.decodeFromJsonElement(TextUpdateDto.serializer(), obj)
+                _events.emit(ServerEvent.TextUpdate(dto.text))
+            }
             "heartbeat_ack" -> {
                 val ts = obj["timestamp"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
                 _events.emit(ServerEvent.HeartbeatAck(ts))
+            }
+            // Debug-only ack for mouse_move RTT (not in AsyncAPI).
+            "mouse_move_ack" -> {
+                if (!DEBUG_MOUSE_MOVE_LATENCY) return
+                val ts = obj["timestamp"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return
+                lastMouseMoveRttMs = (System.currentTimeMillis() - ts).coerceAtLeast(0L)
             }
             "error" -> {
                 val dto = json.decodeFromJsonElement(WsErrorDto.serializer(), obj)
@@ -331,5 +361,12 @@ class CommandSocket @Inject constructor(
     companion object {
         /** Accumulate mouse deltas and flush about once per frame (~16ms). */
         const val MOVE_BATCH_INTERVAL_MS = 16L
+
+        /**
+         * Debug: measure mouse_move RTT via timestamp + stub `mouse_move_ack`.
+         * Also piggybacks `prev_rtt_ms` on the next move so the stub can log real RTT.
+         * Not part of AsyncAPI — set to `false` to disable.
+         */
+        const val DEBUG_MOUSE_MOVE_LATENCY = true
     }
 }
