@@ -159,12 +159,12 @@ class DeviceListViewModel @Inject constructor(
         when (_ui.value.sheetStep) {
             DeviceSheetStep.Overview -> {
                 if (selection.isSaved) {
-                    val args = ConnectingArgs.Saved(
-                        deviceId = selection.deviceId,
-                        deviceName = selection.name,
+                    onStartConnecting(
+                        ConnectingArgs.Saved(
+                            deviceId = selection.deviceId,
+                            deviceName = selection.name,
+                        ),
                     )
-                    dismissSheet()
-                    onStartConnecting(args)
                 } else {
                     _ui.update {
                         it.copy(
@@ -181,15 +181,15 @@ class DeviceListViewModel @Inject constructor(
                     _ui.update { it.copy(sheetError = "Enter 6-digit code") }
                     return
                 }
-                val args = ConnectingArgs.New(
-                    deviceId = selection.deviceId,
-                    deviceName = selection.name,
-                    ip = selection.ip,
-                    port = selection.port,
-                    verificationCode = code,
+                onStartConnecting(
+                    ConnectingArgs.New(
+                        deviceId = selection.deviceId,
+                        deviceName = selection.name,
+                        ip = selection.ip,
+                        port = selection.port,
+                        verificationCode = code,
+                    ),
                 )
-                dismissSheet()
-                onStartConnecting(args)
             }
         }
     }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Link
@@ -41,8 +42,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -209,10 +216,11 @@ fun DeviceSelectionBottomSheet(
                     VerificationCodeField(
                         code = code,
                         onCodeChange = onCodeChange,
+                        onDone = onConnectClick,
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         OutlinedButton(
@@ -231,7 +239,9 @@ fun DeviceSelectionBottomSheet(
                         Button(
                             onClick = onConnectClick,
                             enabled = code.length == 6,
-                            modifier = Modifier.height(48.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
                             shape = RoundedCornerShape(24.dp),
                         ) {
                             Icon(
@@ -263,6 +273,7 @@ fun DeviceSelectionBottomSheet(
 private fun VerificationCodeField(
     code: String,
     onCodeChange: (String) -> Unit,
+    onDone: () -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
@@ -274,10 +285,28 @@ private fun VerificationCodeField(
         onValueChange = { value ->
             onCodeChange(value.filter { it.isDigit() }.take(6))
         },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.NumberPassword,
+            imeAction = ImeAction.Done,
+        ),
+        keyboardActions = KeyboardActions(
+            onDone = { onDone() },
+        ),
         modifier = Modifier
             .fillMaxWidth()
-            .focusRequester(focusRequester),
+            .focusRequester(focusRequester)
+            .onPreviewKeyEvent { event ->
+                if (
+                    event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                ) {
+                    onDone()
+                    true
+                } else {
+                    false
+                }
+            },
         decorationBox = {
             Row(
                 modifier = Modifier

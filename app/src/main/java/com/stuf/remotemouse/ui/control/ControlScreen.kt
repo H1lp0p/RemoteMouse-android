@@ -1,15 +1,18 @@
 package com.stuf.remotemouse.ui.control
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,10 +24,12 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,6 +37,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stuf.remotemouse.R
 import com.stuf.remotemouse.ui.control.mouse.MouseControlPanel
@@ -48,6 +56,24 @@ fun ControlScreen(
     val session by viewModel.session.collectAsStateWithLifecycle()
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val actions by viewModel.actions.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.ensureConnection()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun leaveControl() {
+        viewModel.disconnect()
+        onDisconnect()
+    }
+
+    BackHandler { leaveControl() }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -98,34 +124,59 @@ fun ControlScreen(
                     DropdownMenu(
                         expanded = ui.showDeviceMenu,
                         onDismissRequest = { viewModel.setDeviceMenuVisible(false) },
+                        modifier = Modifier.width(208.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
                     ) {
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    if (ui.isFavorite) {
+                                    text = if (ui.isFavorite) {
                                         stringResource(R.string.remove_from_favorite)
                                     } else {
                                         stringResource(R.string.add_to_favorite)
                                     },
+                                    style = MaterialTheme.typography.labelLarge,
                                 )
                             },
                             onClick = viewModel::toggleFavorite,
                             enabled = !ui.favoriteBusy,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                            colors = MenuDefaults.itemColors(
+                                textColor = MaterialTheme.colorScheme.onSurface,
+                            ),
                         )
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.disconnect)) },
-                            onClick = {
-                                viewModel.setDeviceMenuVisible(false)
-                                viewModel.disconnect()
-                                onDisconnect()
+                            text = {
+                                Text(
+                                    text = stringResource(R.string.edit_actions),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
                             },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.edit_actions)) },
                             onClick = {
                                 viewModel.setDeviceMenuVisible(false)
                                 onEditActions()
                             },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                            colors = MenuDefaults.itemColors(
+                                textColor = MaterialTheme.colorScheme.onSurface,
+                            ),
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = stringResource(R.string.disconnect),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            },
+                            onClick = {
+                                viewModel.setDeviceMenuVisible(false)
+                                leaveControl()
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                            colors = MenuDefaults.itemColors(
+                                textColor = MaterialTheme.colorScheme.onSurface,
+                            ),
                         )
                     }
                 }
@@ -162,7 +213,7 @@ fun ControlScreen(
                         onOpenActions = { viewModel.setActionsSheetVisible(true) },
                         onStickDeflection = viewModel::onStickDeflection,
                         onStickReleased = viewModel::onStickReleased,
-                        onScroll = { dx, dy -> viewModel.onScroll(dx, dy) },
+                        onScrollDeflection = viewModel::onScrollDeflection,
                         onLeftClick = viewModel::leftClick,
                         onRightClick = viewModel::rightClick,
                         modifier = Modifier.fillMaxSize(),
@@ -213,39 +264,54 @@ private fun ControlModeChips(
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ControlMode.entries.forEach { mode ->
-            val selectedChip = mode == selected
-            FilterChip(
-                selected = selectedChip,
-                onClick = { onSelect(mode) },
-                label = { Text(mode.label()) },
-                leadingIcon = {
-                    Icon(
-                        painter = painterResource(mode.iconRes()),
-                        contentDescription = null,
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                ),
-            )
-        }
+        ControlModeChip(
+            selected = selected == ControlMode.Mouse,
+            labelRes = R.string.control_mode_mouse,
+            iconRes = R.drawable.ic_control_mouse,
+            onClick = { onSelect(ControlMode.Mouse) },
+        )
+        ControlModeChip(
+            selected = selected == ControlMode.Stick,
+            labelRes = R.string.control_mode_stick,
+            iconRes = R.drawable.ic_control_stick,
+            onClick = { onSelect(ControlMode.Stick) },
+        )
+        ControlModeChip(
+            selected = selected == ControlMode.Player,
+            labelRes = R.string.control_mode_player,
+            iconRes = R.drawable.ic_control_player,
+            onClick = { onSelect(ControlMode.Player) },
+        )
+        ControlModeChip(
+            selected = selected == ControlMode.Text,
+            labelRes = R.string.control_mode_text,
+            iconRes = R.drawable.ic_control_text,
+            onClick = { onSelect(ControlMode.Text) },
+        )
     }
 }
 
 @Composable
-private fun ControlMode.label(): String = when (this) {
-    ControlMode.Mouse -> stringResource(R.string.control_mode_mouse)
-    ControlMode.Stick -> stringResource(R.string.control_mode_stick)
-    ControlMode.Player -> stringResource(R.string.control_mode_player)
-    ControlMode.Text -> stringResource(R.string.control_mode_text)
-}
-
-private fun ControlMode.iconRes(): Int = when (this) {
-    ControlMode.Mouse -> R.drawable.ic_control_mouse
-    ControlMode.Stick -> R.drawable.ic_control_stick
-    ControlMode.Player -> R.drawable.ic_control_player
-    ControlMode.Text -> R.drawable.ic_control_text
+private fun ControlModeChip(
+    selected: Boolean,
+    labelRes: Int,
+    iconRes: Int,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(stringResource(labelRes)) },
+        leadingIcon = {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+            )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ),
+    )
 }

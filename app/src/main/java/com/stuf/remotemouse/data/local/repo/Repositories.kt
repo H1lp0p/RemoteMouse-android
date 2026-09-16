@@ -5,7 +5,9 @@ import com.stuf.remotemouse.data.local.dao.ActionStepDao
 import com.stuf.remotemouse.data.local.dao.PcDeviceDao
 import com.stuf.remotemouse.data.local.entity.ActionEntity
 import com.stuf.remotemouse.data.local.entity.ActionStepEntity
+import com.stuf.remotemouse.data.local.entity.ActionWithSteps
 import com.stuf.remotemouse.data.local.entity.PcDeviceEntity
+import com.stuf.remotemouse.domain.VkCodes
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -53,11 +55,6 @@ class DeviceRepository @Inject constructor(
     }
 }
 
-data class ActionWithSteps(
-    val action: ActionEntity,
-    val steps: List<ActionStepEntity>,
-)
-
 @Singleton
 class ActionRepository @Inject constructor(
     private val actionDao: ActionDao,
@@ -65,6 +62,9 @@ class ActionRepository @Inject constructor(
 ) {
     fun observeActions(deviceId: String): Flow<List<ActionEntity>> =
         actionDao.observeByDevice(deviceId)
+
+    fun observeActionsWithSteps(deviceId: String): Flow<List<ActionWithSteps>> =
+        actionDao.observeByDeviceWithSteps(deviceId)
 
     fun observeSteps(actionId: Long): Flow<List<ActionStepEntity>> =
         actionStepDao.observeByAction(actionId)
@@ -104,10 +104,26 @@ class ActionRepository @Inject constructor(
         actionDao.delete(actionId)
     }
 
-    fun parseVkCodes(stepStringCode: String): List<Int> =
-        stepStringCode
-            .split(',', '+', ' ')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .mapNotNull { it.toIntOrNull() }
+    suspend fun ensureDefaultActions(deviceId: String) {
+        if (deviceId.isBlank()) return
+        if (actionDao.countByDevice(deviceId) > 0) return
+        DEFAULT_ACTIONS.forEach { (name, stepName, code) ->
+            saveAction(
+                actionId = 0,
+                deviceId = deviceId,
+                name = name,
+                steps = listOf(stepName to code),
+            )
+        }
+    }
+
+    fun parseVkCodes(stepStringCode: String): List<Int> = VkCodes.parse(stepStringCode)
+
+    companion object {
+        private val DEFAULT_ACTIONS = listOf(
+            Triple("Copy", "Ctrl+C", "17,67"),
+            Triple("Paste", "Ctrl+V", "17,86"),
+            Triple("Alt+Tab", "Alt+Tab", "18,9"),
+        )
+    }
 }

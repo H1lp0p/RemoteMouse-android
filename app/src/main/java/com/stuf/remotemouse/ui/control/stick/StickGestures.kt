@@ -6,7 +6,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.changedToUp
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.hypot
@@ -42,7 +41,7 @@ internal suspend fun PointerInputScope.detectStickGestures(
     onRightClick: () -> Unit,
     onStickDeflection: (ox: Float, oy: Float) -> Unit,
     onStickReleased: () -> Unit,
-    onScroll: (dx: Float, dy: Float) -> Unit,
+    onScrollDeflection: (ox: Float, oy: Float) -> Unit,
     onScrollModeEntered: () -> Unit,
 ) {
     val slopPx = moveSlop.toPx()
@@ -149,10 +148,7 @@ internal suspend fun PointerInputScope.detectStickGestures(
                     }
                     StickMode.Scroll -> {
                         if (scrollArmed) {
-                            val delta = change.positionChange()
-                            if (delta != Offset.Zero) {
-                                onScroll(delta.x, delta.y)
-                            }
+                            onScrollDeflection(knob.x, knob.y)
                         }
                         publish(knob)
                     }

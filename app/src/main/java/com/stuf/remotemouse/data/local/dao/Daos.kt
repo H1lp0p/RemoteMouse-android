@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Update
 import com.stuf.remotemouse.data.local.entity.ActionEntity
 import com.stuf.remotemouse.data.local.entity.ActionStepEntity
+import com.stuf.remotemouse.data.local.entity.ActionWithSteps
 import com.stuf.remotemouse.data.local.entity.MeEntity
 import com.stuf.remotemouse.data.local.entity.PcDeviceEntity
 import kotlinx.coroutines.flow.Flow
@@ -48,6 +49,13 @@ interface PcDeviceDao {
 interface ActionDao {
     @Query("SELECT * FROM actions WHERE deviceId = :deviceId ORDER BY name ASC")
     fun observeByDevice(deviceId: String): Flow<List<ActionEntity>>
+
+    @androidx.room.Transaction
+    @Query("SELECT * FROM actions WHERE deviceId = :deviceId ORDER BY name ASC")
+    fun observeByDeviceWithSteps(deviceId: String): Flow<List<ActionWithSteps>>
+
+    @Query("SELECT COUNT(*) FROM actions WHERE deviceId = :deviceId")
+    suspend fun countByDevice(deviceId: String): Int
 
     @Query("SELECT * FROM actions WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): ActionEntity?

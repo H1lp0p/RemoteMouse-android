@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stuf.remotemouse.R
+import kotlinx.coroutines.launch
 
 data class ActionListItem(
     val id: Long,
@@ -48,9 +50,19 @@ fun ActionsBottomSheet(
     onRunAction: (Long) -> Unit,
     onEditActions: () -> Unit,
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+
+    fun hideThen(action: () -> Unit) {
+        scope.launch {
+            sheetState.hide()
+            action()
+        }
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        onDismissRequest = { hideThen(onDismiss) },
+        sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
     ) {
@@ -96,7 +108,7 @@ fun ActionsBottomSheet(
                     color = MaterialTheme.colorScheme.onBackground,
                 )
                 TextButton(
-                    onClick = onEditActions,
+                    onClick = { hideThen(onEditActions) },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 ) {
                     Icon(

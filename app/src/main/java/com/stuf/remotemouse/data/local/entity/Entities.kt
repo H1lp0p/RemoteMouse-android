@@ -27,14 +27,6 @@ data class PcDeviceEntity(
 
 @Entity(
     tableName = "actions",
-    foreignKeys = [
-        ForeignKey(
-            entity = PcDeviceEntity::class,
-            parentColumns = ["deviceId"],
-            childColumns = ["deviceId"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
     indices = [Index("deviceId")],
 )
 data class ActionEntity(

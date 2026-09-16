@@ -17,10 +17,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,6 +34,8 @@ import com.stuf.remotemouse.R
 import com.stuf.remotemouse.ui.components.DeviceListCard
 import com.stuf.remotemouse.ui.components.DeviceListTone
 import com.stuf.remotemouse.ui.connecting.ConnectingArgs
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +46,10 @@ fun DeviceListScreen(
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -127,9 +137,22 @@ fun DeviceListScreen(
             step = ui.sheetStep,
             code = ui.verificationCode,
             errorMessage = ui.sheetError,
+            sheetState = sheetState,
             onDismiss = viewModel::dismissSheet,
             onCodeChange = viewModel::onCodeChange,
-            onConnectClick = { viewModel.onConnectClick(onStartConnecting) },
+            onConnectClick = {
+                viewModel.onConnectClick { args ->
+                    scope.launch {
+                        focusManager.clearFocus(force = true)
+                        keyboardController?.hide()
+                        // Wait for IME dismiss animation before closing the sheet / navigating.
+                        delay(220)
+                        sheetState.hide()
+                        viewModel.dismissSheet()
+                        onStartConnecting(args)
+                    }
+                }
+            },
         )
     }
 }

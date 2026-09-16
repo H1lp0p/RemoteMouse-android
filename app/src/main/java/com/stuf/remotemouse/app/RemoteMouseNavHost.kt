@@ -73,9 +73,7 @@ fun RemoteMouseNavHost() {
                         popUpTo(Routes.DEVICE_LIST) { inclusive = true }
                     }
                 },
-                onEditActions = {
-                    // Stub: dedicated edit-actions screen later.
-                },
+                onEditActions = { navController.navigate(Routes.ACTIONS) },
             )
         }
         composable(Routes.TEXT) {

@@ -18,7 +18,7 @@ import com.stuf.remotemouse.data.local.entity.PcDeviceEntity
         ActionEntity::class,
         ActionStepEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

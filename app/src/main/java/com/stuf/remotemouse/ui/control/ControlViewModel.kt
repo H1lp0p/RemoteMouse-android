@@ -9,6 +9,7 @@ import com.stuf.remotemouse.data.remote.ServerEvent
 import com.stuf.remotemouse.data.remote.dto.MediaUpdateDto
 import com.stuf.remotemouse.data.remote.dto.VolumeUpdateDto
 import com.stuf.remotemouse.data.settings.AppSettings
+import com.stuf.remotemouse.domain.VkCodes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -68,8 +69,8 @@ class ControlViewModel @Inject constructor(
                         ActionListItem(
                             id = action.id,
                             name = action.name,
-                            subtitle = steps.joinToString(" + ") { step ->
-                                step.name.ifBlank { step.stepStringCode }
+                            subtitle = steps.joinToString(", ") { step ->
+                                VkCodes.formatSequence(step.stepStringCode)
                             },
                         )
                     }
@@ -83,6 +84,7 @@ class ControlViewModel @Inject constructor(
 
     @Volatile private var stickOx = 0f
     @Volatile private var stickOy = 0f
+    @Volatile private var stickScrollMode = false
     private var stickJob: Job? = null
     private var mediaProgressJob: Job? = null
     private var mediaSubscribed = false
@@ -255,12 +257,24 @@ class ControlViewModel @Inject constructor(
     fun onStickDeflection(ox: Float, oy: Float) {
         stickOx = ox
         stickOy = oy
+        stickScrollMode = false
+        ensureStickLoop()
+    }
+
+    /**
+     * Stick scroll: continuous scroll while deflected (same loop idea as move).
+     */
+    fun onScrollDeflection(ox: Float, oy: Float) {
+        stickOx = ox
+        stickOy = oy
+        stickScrollMode = true
         ensureStickLoop()
     }
 
     fun onStickReleased() {
         stickOx = 0f
         stickOy = 0f
+        stickScrollMode = false
         stickJob?.cancel()
         stickJob = null
         orchestrator.socket().setMouseMoveVelocity(0, 0)
@@ -272,13 +286,25 @@ class ControlViewModel @Inject constructor(
             while (isActive) {
                 val ox = stickOx
                 val oy = stickOy
+                val scroll = stickScrollMode
                 if (ox == 0f && oy == 0f) break
                 val sens = sensitivity.value
-                // Full deflection (~120–150px) → ~15–25px cursor / 16ms tick
-                val scale = 0.14f * sens
-                val ix = (ox * scale).toInt()
-                val iy = (oy * scale).toInt()
-                orchestrator.socket().setMouseMoveVelocity(ix, iy)
+                if (scroll) {
+                    orchestrator.socket().setMouseMoveVelocity(0, 0)
+                    // Full deflection → steady scroll ticks (~same cadence as move).
+                    val scale = 0.12f * sens
+                    val dx = (ox * scale).toInt().coerceIn(-240, 240)
+                    val dy = (-oy * scale).toInt().coerceIn(-240, 240)
+                    if (dx != 0 || dy != 0) {
+                        orchestrator.socket().mouseScroll(deltaY = dy, deltaX = dx)
+                    }
+                } else {
+                    // Full deflection (~120–150px) → ~15–25px cursor / 16ms tick
+                    val scale = 0.14f * sens
+                    val ix = (ox * scale).toInt()
+                    val iy = (oy * scale).toInt()
+                    orchestrator.socket().setMouseMoveVelocity(ix, iy)
+                }
                 delay(16)
             }
             orchestrator.socket().setMouseMoveVelocity(0, 0)
@@ -376,6 +402,10 @@ class ControlViewModel @Inject constructor(
                 _ui.update { it.copy(favoriteBusy = false) }
             }
         }
+    }
+
+    fun ensureConnection() {
+        orchestrator.ensureSocketConnected()
     }
 
     fun disconnect() {

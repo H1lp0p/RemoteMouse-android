@@ -1,6 +1,7 @@
 package com.stuf.remotemouse.data.remote
 
 import com.stuf.remotemouse.data.identity.IdentityRepository
+import com.stuf.remotemouse.data.local.repo.ActionRepository
 import com.stuf.remotemouse.data.local.repo.DeviceRepository
 import com.stuf.remotemouse.data.remote.dto.ErrorResponseDto
 import com.stuf.remotemouse.data.remote.dto.FingerprintDto
@@ -23,6 +24,7 @@ class ConnectionOrchestrator @Inject constructor(
     private val commandSocket: CommandSocket,
     private val identityRepository: IdentityRepository,
     private val deviceRepository: DeviceRepository,
+    private val actionRepository: ActionRepository,
     private val json: Json,
 ) {
     private val _session = MutableStateFlow<ActiveSession?>(null)
@@ -49,7 +51,8 @@ class ConnectionOrchestrator @Inject constructor(
             verificationCode = verificationCode,
         )
         executePair(api, body)
-        commandSocket.connect(wsUrl(ip, port))
+        openSocket(ip, port)
+        actionRepository.ensureDefaultActions(deviceId)
         val active = ActiveSession(deviceId, deviceName, ip, port)
         _session.value = active
         return active
@@ -85,11 +88,24 @@ class ConnectionOrchestrator @Inject constructor(
             throw e
         }
 
-        commandSocket.connect(wsUrl(ip, port))
+        openSocket(ip, port)
         deviceRepository.touch(deviceId, ip, port)
+        actionRepository.ensureDefaultActions(deviceId)
         val active = ActiveSession(deviceId, saved.name, ip, port)
         _session.value = active
         return active
+    }
+
+    /**
+     * Reconnects the command WebSocket if a session is active but the socket dropped
+     * (e.g. after the app was backgrounded). Does not clear the session on failure.
+     */
+    fun ensureSocketConnected() {
+        val session = _session.value ?: return
+        when (commandSocket.state.value) {
+            WsConnectionState.Connected, WsConnectionState.Connecting -> return
+            WsConnectionState.Disconnected -> openSocket(session.ip, session.port)
+        }
     }
 
     suspend fun saveCurrentDevice() {
@@ -107,6 +123,7 @@ class ConnectionOrchestrator @Inject constructor(
                     lastIp = session.ip,
                     port = session.port,
                 )
+                actionRepository.ensureDefaultActions(event.deviceId)
                 _session.value = session.copy(
                     deviceId = event.deviceId,
                     deviceName = event.deviceName.ifBlank { session.deviceName },
@@ -123,6 +140,10 @@ class ConnectionOrchestrator @Inject constructor(
     }
 
     fun socket(): CommandSocket = commandSocket
+
+    private fun openSocket(ip: String, port: Int) {
+        commandSocket.connect(wsUrl(ip, port))
+    }
 
     private fun apiFor(ip: String, port: Int): PairingApi =
         retrofitBuilder

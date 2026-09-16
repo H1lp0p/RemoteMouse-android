@@ -58,6 +58,9 @@ fun TextControlPanel(
                     setLineSpacing(0f, 1.1f)
                     isVerticalScrollBarEnabled = false
                     isHorizontalScrollBarEnabled = false
+                    isCursorVisible = false
+                    isFocusable = true
+                    isFocusableInTouchMode = true
                     textCursorDrawable?.setTint(cursorTint)
                     highlightColor = AndroidColor.argb(
                         0x66,
@@ -65,6 +68,11 @@ fun TextControlPanel(
                         AndroidColor.green(cursorTint),
                         AndroidColor.blue(cursorTint),
                     )
+                    setOnFocusChangeListener { _, hasFocus ->
+                        isCursorVisible = hasFocus
+                        // Hide placeholder while focused (even if empty).
+                        setHint(if (hasFocus) null else hint)
+                    }
                     doAfterTextChanged { editable ->
                         val newText = editable?.toString().orEmpty()
                         if (newText != lastEmitted.value) {
@@ -72,17 +80,22 @@ fun TextControlPanel(
                             onTextChange(newText)
                         }
                     }
-                    post { requestFocus() }
+                    clearFocus()
                 }
             },
             update = { editText ->
                 editText.setTextColor(textColor)
                 editText.setHintTextColor(hintColor)
-                editText.hint = hint
+                if (!editText.hasFocus()) {
+                    editText.hint = hint
+                    editText.isCursorVisible = false
+                }
                 if (editText.text?.toString() != text) {
                     val cursor = editText.selectionStart.coerceIn(0, text.length)
                     editText.setText(text)
-                    editText.setSelection(cursor.coerceAtMost(text.length))
+                    if (editText.hasFocus()) {
+                        editText.setSelection(cursor.coerceAtMost(text.length))
+                    }
                     lastEmitted.value = text
                 }
             },

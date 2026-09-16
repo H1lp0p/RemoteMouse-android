@@ -1,7 +1,8 @@
 package com.stuf.remotemouse.ui.control.mouse
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -98,7 +100,11 @@ fun MouseControlPanel(
                 held = leftHeld,
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onToggleLeft()
+                    if (leftHeld) onToggleLeft() else onLeftClick()
+                },
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (!leftHeld) onToggleLeft()
                 },
                 modifier = Modifier.weight(1f),
             )
@@ -107,7 +113,11 @@ fun MouseControlPanel(
                 held = rightHeld,
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onToggleRight()
+                    if (rightHeld) onToggleRight() else onRightClick()
+                },
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (!rightHeld) onToggleRight()
                 },
                 modifier = Modifier.weight(1f),
             )
@@ -115,25 +125,32 @@ fun MouseControlPanel(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MouseButtonToggle(
     label: String,
     held: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val shape = RoundedCornerShape(16.dp)
     Box(
         modifier = modifier
             .fillMaxSize()
+            .clip(shape)
             .background(
                 color = if (held) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.surfaceContainer
                 },
-                shape = RoundedCornerShape(16.dp),
+                shape = shape,
             )
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(
