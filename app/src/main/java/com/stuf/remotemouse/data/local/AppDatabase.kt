@@ -2,6 +2,8 @@ package com.stuf.remotemouse.data.local
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.stuf.remotemouse.data.local.dao.ActionDao
 import com.stuf.remotemouse.data.local.dao.ActionStepDao
 import com.stuf.remotemouse.data.local.dao.MeDao
@@ -18,7 +20,7 @@ import com.stuf.remotemouse.data.local.entity.PcDeviceEntity
         ActionEntity::class,
         ActionStepEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,4 +28,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun pcDeviceDao(): PcDeviceDao
     abstract fun actionDao(): ActionDao
     abstract fun actionStepDao(): ActionStepDao
+}
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE pc_devices ADD COLUMN cursorSensitivity REAL NOT NULL DEFAULT 1.0",
+        )
+    }
 }

@@ -5,27 +5,22 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuDefaults
-import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,7 +44,6 @@ import com.stuf.remotemouse.ui.control.text.TextControlPanel
 
 @Composable
 fun ControlScreen(
-    onDisconnect: () -> Unit,
     onEditActions: () -> Unit = {},
     viewModel: ControlViewModel = hiltViewModel(),
 ) {
@@ -70,7 +64,6 @@ fun ControlScreen(
 
     fun leaveControl() {
         viewModel.disconnect()
-        onDisconnect()
     }
 
     BackHandler { leaveControl() }
@@ -108,77 +101,17 @@ fun ControlScreen(
                     color = MaterialTheme.colorScheme.onSecondary,
                     modifier = Modifier.padding(end = 8.dp),
                 )
-                Box {
-                    OutlinedIconButton(
-                        onClick = { viewModel.setDeviceMenuVisible(true) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = IconButtonDefaults.outlinedIconButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                        ),
-                    ) {
-                        Icon(
-                            Icons.Default.MoreVert,
-                            contentDescription = stringResource(R.string.device_menu),
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = ui.showDeviceMenu,
-                        onDismissRequest = { viewModel.setDeviceMenuVisible(false) },
-                        modifier = Modifier.width(208.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    ) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = if (ui.isFavorite) {
-                                        stringResource(R.string.remove_from_favorite)
-                                    } else {
-                                        stringResource(R.string.add_to_favorite)
-                                    },
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            },
-                            onClick = viewModel::toggleFavorite,
-                            enabled = !ui.favoriteBusy,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                            colors = MenuDefaults.itemColors(
-                                textColor = MaterialTheme.colorScheme.onSurface,
-                            ),
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = stringResource(R.string.edit_actions),
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            },
-                            onClick = {
-                                viewModel.setDeviceMenuVisible(false)
-                                onEditActions()
-                            },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                            colors = MenuDefaults.itemColors(
-                                textColor = MaterialTheme.colorScheme.onSurface,
-                            ),
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = stringResource(R.string.disconnect),
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            },
-                            onClick = {
-                                viewModel.setDeviceMenuVisible(false)
-                                leaveControl()
-                            },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                            colors = MenuDefaults.itemColors(
-                                textColor = MaterialTheme.colorScheme.onSurface,
-                            ),
-                        )
-                    }
+                IconButton(
+                    onClick = onEditActions,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = IconButtonDefaults.outlinedIconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
+                ) {
+                    Icon(
+                        Icons.Outlined.Settings,
+                        contentDescription = stringResource(R.string.device_settings),
+                    )
                 }
             }
 

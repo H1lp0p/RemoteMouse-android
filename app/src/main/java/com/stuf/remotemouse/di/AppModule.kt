@@ -3,6 +3,7 @@ package com.stuf.remotemouse.di
 import android.content.Context
 import androidx.room.Room
 import com.stuf.remotemouse.data.local.AppDatabase
+import com.stuf.remotemouse.data.local.MIGRATION_2_3
 import com.stuf.remotemouse.data.local.dao.ActionDao
 import com.stuf.remotemouse.data.local.dao.ActionStepDao
 import com.stuf.remotemouse.data.local.dao.MeDao
@@ -28,6 +29,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "remote_mouse.db")
+            .addMigrations(MIGRATION_2_3)
             .fallbackToDestructiveMigration(true)
             .build()
 

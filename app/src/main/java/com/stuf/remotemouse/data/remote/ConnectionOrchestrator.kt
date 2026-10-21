@@ -3,6 +3,7 @@ package com.stuf.remotemouse.data.remote
 import com.stuf.remotemouse.data.identity.IdentityRepository
 import com.stuf.remotemouse.data.local.repo.ActionRepository
 import com.stuf.remotemouse.data.local.repo.DeviceRepository
+import com.stuf.remotemouse.data.settings.CursorSensitivity
 import com.stuf.remotemouse.data.remote.dto.ErrorResponseDto
 import com.stuf.remotemouse.data.remote.dto.FingerprintDto
 import com.stuf.remotemouse.data.remote.dto.PairingRequestDto
@@ -10,10 +11,14 @@ import com.stuf.remotemouse.domain.ActiveSession
 import com.stuf.remotemouse.domain.PairingException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import retrofit2.Retrofit
 
@@ -25,6 +30,7 @@ class ConnectionOrchestrator @Inject constructor(
     private val identityRepository: IdentityRepository,
     private val deviceRepository: DeviceRepository,
     private val actionRepository: ActionRepository,
+    private val cursorSensitivity: CursorSensitivity,
     private val json: Json,
 ) {
     private val _session = MutableStateFlow<ActiveSession?>(null)
@@ -32,6 +38,25 @@ class ConnectionOrchestrator @Inject constructor(
 
     val wsState = commandSocket.state
     val events = commandSocket.events
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    @Volatile
+    private var inForeground = false
+
+    init {
+        scope.launch {
+            commandSocket.remoteClosed.collect { closedByPeer ->
+                if (_session.value != null && (closedByPeer || inForeground)) {
+                    _session.value = null
+                }
+            }
+        }
+    }
+
+    fun setInForeground(foreground: Boolean) {
+        inForeground = foreground
+    }
 
     suspend fun pairNew(
         deviceId: String,
@@ -122,6 +147,7 @@ class ConnectionOrchestrator @Inject constructor(
                     name = event.deviceName.ifBlank { session.deviceName },
                     lastIp = session.ip,
                     port = session.port,
+                    cursorSensitivity = cursorSensitivity.coefficient.value,
                 )
                 actionRepository.ensureDefaultActions(event.deviceId)
                 _session.value = session.copy(

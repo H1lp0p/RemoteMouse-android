@@ -3,12 +3,11 @@ package com.stuf.remotemouse.ui.control
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stuf.remotemouse.data.local.repo.ActionRepository
-import com.stuf.remotemouse.data.local.repo.DeviceRepository
 import com.stuf.remotemouse.data.remote.ConnectionOrchestrator
 import com.stuf.remotemouse.data.remote.ServerEvent
 import com.stuf.remotemouse.data.remote.dto.MediaUpdateDto
 import com.stuf.remotemouse.data.remote.dto.VolumeUpdateDto
-import com.stuf.remotemouse.data.settings.AppSettings
+import com.stuf.remotemouse.data.settings.CursorSensitivity
 import com.stuf.remotemouse.domain.VkCodes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -19,7 +18,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -33,24 +31,19 @@ data class ControlUiState(
     val mode: ControlMode = ControlMode.Mouse,
     val leftHeld: Boolean = false,
     val rightHeld: Boolean = false,
-    val isFavorite: Boolean = false,
-    val showDeviceMenu: Boolean = false,
     val showActionsSheet: Boolean = false,
     val volume: VolumeUpdateDto = VolumeUpdateDto(level = 50, muted = false),
     val media: MediaUpdateDto? = null,
     val sharedText: String = "",
     val pingMs: Long? = null,
-    val favoriteBusy: Boolean = false,
-    val favoriteError: String? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ControlViewModel @Inject constructor(
     private val orchestrator: ConnectionOrchestrator,
-    private val deviceRepository: DeviceRepository,
     private val actionRepository: ActionRepository,
-    private val appSettings: AppSettings,
+    private val cursorSensitivity: CursorSensitivity,
 ) : ViewModel() {
     val session = orchestrator.session
 
@@ -79,8 +72,7 @@ class ControlViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val sensitivity = appSettings.touchpadSensitivity
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 1.2f)
+    private val sensitivity = cursorSensitivity.coefficient
 
     @Volatile private var stickOx = 0f
     @Volatile private var stickOy = 0f
@@ -94,10 +86,8 @@ class ControlViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            combine(session, deviceRepository.observeDevices()) { active, devices ->
-                active?.deviceId != null && devices.any { it.deviceId == active.deviceId }
-            }.collect { favorite ->
-                _ui.update { it.copy(isFavorite = favorite) }
+            session.collect { active ->
+                cursorSensitivity.attach(active?.deviceId)
             }
         }
         viewModelScope.launch {
@@ -224,20 +214,14 @@ class ControlViewModel @Inject constructor(
         }
     }
 
-    fun setDeviceMenuVisible(visible: Boolean) {
-        _ui.update { it.copy(showDeviceMenu = visible) }
-    }
-
     fun setActionsSheetVisible(visible: Boolean) {
-        _ui.update { it.copy(showActionsSheet = visible, showDeviceMenu = false) }
+        _ui.update { it.copy(showActionsSheet = visible) }
     }
 
     fun onMove(dx: Float, dy: Float) {
-        val sens = sensitivity.value
-        val ix = (dx * sens).toInt()
-        val iy = (dy * sens).toInt()
-        if (ix == 0 && iy == 0) return
-        orchestrator.socket().mouseMove(ix, iy)
+        val (sx, sy) = cursorSensitivity.scale(dx, dy)
+        if (sx == 0f && sy == 0f) return
+        orchestrator.socket().mouseMove(sx, sy)
     }
 
     fun onScroll(deltaY: Float) {
@@ -277,7 +261,7 @@ class ControlViewModel @Inject constructor(
         stickScrollMode = false
         stickJob?.cancel()
         stickJob = null
-        orchestrator.socket().setMouseMoveVelocity(0, 0)
+        orchestrator.socket().setMouseMoveVelocity(0f, 0f)
     }
 
     private fun ensureStickLoop() {
@@ -288,11 +272,10 @@ class ControlViewModel @Inject constructor(
                 val oy = stickOy
                 val scroll = stickScrollMode
                 if (ox == 0f && oy == 0f) break
-                val sens = sensitivity.value
                 if (scroll) {
-                    orchestrator.socket().setMouseMoveVelocity(0, 0)
+                    orchestrator.socket().setMouseMoveVelocity(0f, 0f)
                     // Full deflection → steady scroll ticks (~same cadence as move).
-                    val scale = 0.12f * sens
+                    val scale = 0.12f
                     val dx = (ox * scale).toInt().coerceIn(-240, 240)
                     val dy = (-oy * scale).toInt().coerceIn(-240, 240)
                     if (dx != 0 || dy != 0) {
@@ -300,14 +283,12 @@ class ControlViewModel @Inject constructor(
                     }
                 } else {
                     // Full deflection (~120–150px) → ~15–25px cursor / 16ms tick
-                    val scale = 0.14f * sens
-                    val ix = (ox * scale).toInt()
-                    val iy = (oy * scale).toInt()
-                    orchestrator.socket().setMouseMoveVelocity(ix, iy)
+                    val scale = 0.14f * sensitivity.value
+                    orchestrator.socket().setMouseMoveVelocity(ox * scale, oy * scale)
                 }
                 delay(16)
             }
-            orchestrator.socket().setMouseMoveVelocity(0, 0)
+            orchestrator.socket().setMouseMoveVelocity(0f, 0f)
             stickJob = null
         }
     }
@@ -382,24 +363,6 @@ class ControlViewModel @Inject constructor(
                 if (keys.isNotEmpty()) {
                     orchestrator.socket().keySequence(keys)
                 }
-            }
-        }
-    }
-
-    fun toggleFavorite() {
-        val active = session.value ?: return
-        viewModelScope.launch {
-            _ui.update { it.copy(favoriteBusy = true, favoriteError = null, showDeviceMenu = false) }
-            try {
-                if (_ui.value.isFavorite) {
-                    deviceRepository.delete(active.deviceId)
-                } else {
-                    orchestrator.saveCurrentDevice()
-                }
-            } catch (e: Exception) {
-                _ui.update { it.copy(favoriteError = e.message) }
-            } finally {
-                _ui.update { it.copy(favoriteBusy = false) }
             }
         }
     }

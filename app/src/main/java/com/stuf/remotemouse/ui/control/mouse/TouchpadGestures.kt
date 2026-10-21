@@ -36,6 +36,7 @@ fun Modifier.touchpadGestures(
     coroutineScope {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
+            down.consume()
             var totalTravel = 0f
             var mode = TouchMode.Pending
 

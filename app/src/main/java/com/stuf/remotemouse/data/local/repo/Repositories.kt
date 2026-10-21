@@ -27,7 +27,9 @@ class DeviceRepository @Inject constructor(
         name: String,
         lastIp: String,
         port: Int = 12345,
+        cursorSensitivity: Float? = null,
     ) {
+        val existing = pcDeviceDao.getById(deviceId)
         pcDeviceDao.upsert(
             PcDeviceEntity(
                 deviceId = deviceId,
@@ -35,8 +37,17 @@ class DeviceRepository @Inject constructor(
                 lastIp = lastIp,
                 port = port,
                 lastUsedAt = System.currentTimeMillis(),
+                cursorSensitivity = cursorSensitivity
+                    ?: existing?.cursorSensitivity
+                    ?: PcDeviceEntity.DEFAULT_CURSOR_SENSITIVITY,
             ),
         )
+    }
+
+    suspend fun setCursorSensitivity(deviceId: String, value: Float) {
+        val existing = pcDeviceDao.getById(deviceId) ?: return
+        if (existing.cursorSensitivity == value) return
+        pcDeviceDao.upsert(existing.copy(cursorSensitivity = value))
     }
 
     suspend fun touch(deviceId: String, lastIp: String, port: Int) {

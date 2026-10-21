@@ -63,9 +63,16 @@ class CommandSocket @Inject constructor(
     private var heartbeatJob: Job? = null
     private var moveFlushJob: Job? = null
     private val intentionalClose = AtomicBoolean(false)
+    private var activeGeneration = 0
+    private val _remoteClosed = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+    /**
+     * Current socket died and this client did not call [disconnect].
+     * `true` — peer sent a close frame. `false` — transport failure.
+     */
+    val remoteClosed: SharedFlow<Boolean> = _remoteClosed.asSharedFlow()
     private val moveLock = Any()
-    private var pendingMoveDx = 0
-    private var pendingMoveDy = 0
+    private var pendingMoveDx = 0f
+    private var pendingMoveDy = 0f
     /** Last mouse_move RTT (ms) measured on this device via mouse_move_ack. Debug only. */
     @Volatile private var lastMouseMoveRttMs: Long? = null
 
@@ -81,10 +88,11 @@ class CommandSocket @Inject constructor(
 
     fun connect(url: String) {
         disconnect()
+        val generation = ++activeGeneration
         intentionalClose.set(false)
         _state.value = WsConnectionState.Connecting
         val request = Request.Builder().url(url).build()
-        webSocket = okHttpClient.newWebSocket(request, listener)
+        webSocket = okHttpClient.newWebSocket(request, SocketListener(generation))
     }
 
     fun disconnect() {
@@ -111,10 +119,11 @@ class CommandSocket @Inject constructor(
 
     /**
      * Accumulates move deltas and flushes ~every [MOVE_BATCH_INTERVAL_MS].
+     * Fractional pixels stay in the accumulator until they make a whole pixel.
      * Call [flushMouseMove] before clicks/scroll so the cursor is up to date.
      */
-    fun mouseMove(dx: Int, dy: Int) {
-        if (dx == 0 && dy == 0) return
+    fun mouseMove(dx: Float, dy: Float) {
+        if (dx == 0f && dy == 0f) return
         synchronized(moveLock) {
             pendingMoveDx += dx
             pendingMoveDy += dy
@@ -122,23 +131,32 @@ class CommandSocket @Inject constructor(
         ensureMoveFlushLoop()
     }
 
-    /** Replaces the pending move vector (used by stick velocity from center). */
-    fun setMouseMoveVelocity(dx: Int, dy: Int) {
+    /**
+     * Stick: one tick of velocity, added to the same sub-pixel accumulator.
+     * Zero clears the accumulator (finger up).
+     */
+    fun setMouseMoveVelocity(dx: Float, dy: Float) {
         synchronized(moveLock) {
-            pendingMoveDx = dx
-            pendingMoveDy = dy
+            if (dx == 0f && dy == 0f) {
+                pendingMoveDx = 0f
+                pendingMoveDy = 0f
+            } else {
+                pendingMoveDx += dx
+                pendingMoveDy += dy
+            }
         }
-        if (dx != 0 || dy != 0) {
+        if (dx != 0f || dy != 0f) {
             ensureMoveFlushLoop()
         }
     }
 
     fun flushMouseMove() {
         val (dx, dy) = synchronized(moveLock) {
-            val pair = pendingMoveDx to pendingMoveDy
-            pendingMoveDx = 0
-            pendingMoveDy = 0
-            pair
+            val ix = pendingMoveDx.toInt()
+            val iy = pendingMoveDy.toInt()
+            pendingMoveDx -= ix
+            pendingMoveDy -= iy
+            ix to iy
         }
         if (dx == 0 && dy == 0) return
         sendJson(
@@ -262,7 +280,7 @@ class CommandSocket @Inject constructor(
                 delay(MOVE_BATCH_INTERVAL_MS)
                 flushMouseMove()
                 val idle = synchronized(moveLock) {
-                    pendingMoveDx == 0 && pendingMoveDy == 0
+                    pendingMoveDx.toInt() == 0 && pendingMoveDy.toInt() == 0
                 }
                 if (idle) break
             }
@@ -277,41 +295,56 @@ class CommandSocket @Inject constructor(
             flushMouseMove()
         } else {
             synchronized(moveLock) {
-                pendingMoveDx = 0
-                pendingMoveDy = 0
+                pendingMoveDx = 0f
+                pendingMoveDy = 0f
             }
         }
     }
 
-    private val listener = object : WebSocketListener() {
+    private inner class SocketListener(
+        private val generation: Int,
+    ) : WebSocketListener() {
+        private fun isCurrent(): Boolean = generation == activeGeneration
+
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (!isCurrent()) return
             _state.value = WsConnectionState.Connected
             startHeartbeat()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (!isCurrent()) return
             scope.launch { handleMessage(text) }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            if (!isCurrent()) return
             webSocket.close(code, reason)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            stopMoveBatching(sendPending = false)
-            heartbeatJob?.cancel()
-            _state.value = WsConnectionState.Disconnected
+            if (!isCurrent()) return
+            markSocketGone(closedByPeer = true)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            stopMoveBatching(sendPending = false)
-            heartbeatJob?.cancel()
-            _state.value = WsConnectionState.Disconnected
+            if (!isCurrent()) return
+            markSocketGone(closedByPeer = false)
             if (!intentionalClose.get()) {
                 scope.launch {
                     _events.emit(ServerEvent.Error(-1, t.message ?: "WebSocket failure"))
                 }
             }
+        }
+    }
+
+    private fun markSocketGone(closedByPeer: Boolean) {
+        stopMoveBatching(sendPending = false)
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        _state.value = WsConnectionState.Disconnected
+        if (!intentionalClose.get()) {
+            _remoteClosed.tryEmit(closedByPeer)
         }
     }
 

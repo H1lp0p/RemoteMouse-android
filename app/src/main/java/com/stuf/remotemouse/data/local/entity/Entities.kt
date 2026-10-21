@@ -23,7 +23,13 @@ data class PcDeviceEntity(
     val lastIp: String,
     val port: Int = 12345,
     val lastUsedAt: Long,
-)
+    /** Multiplier applied to cursor dx/dy on the phone before send. */
+    val cursorSensitivity: Float = DEFAULT_CURSOR_SENSITIVITY,
+) {
+    companion object {
+        const val DEFAULT_CURSOR_SENSITIVITY = 1f
+    }
+}
 
 @Entity(
     tableName = "actions",

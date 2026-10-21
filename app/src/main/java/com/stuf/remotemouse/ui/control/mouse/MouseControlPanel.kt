@@ -39,7 +39,6 @@ fun MouseControlPanel(
     modifier: Modifier = Modifier,
 ) {
     val haptic = LocalHapticFeedback.current
-
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -61,33 +60,15 @@ fun MouseControlPanel(
             }
         }
 
-        Surface(
+        TouchpadSurface(
+            onMove = onMove,
+            onScroll = onScroll,
+            onLeftClick = onLeftClick,
+            onRightClick = onRightClick,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .touchpadGestures(
-                        haptic = haptic,
-                        onMove = onMove,
-                        onScroll = onScroll,
-                        onLeftClick = onLeftClick,
-                        onRightClick = onRightClick,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.touchpad_hints),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSecondary,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
+        )
 
         Row(
             modifier = Modifier
@@ -120,6 +101,42 @@ fun MouseControlPanel(
                     if (!rightHeld) onToggleRight()
                 },
                 modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+fun TouchpadSurface(
+    onMove: (Float, Float) -> Unit,
+    onScroll: (Float) -> Unit,
+    onLeftClick: () -> Unit,
+    onRightClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptic = LocalHapticFeedback.current
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .touchpadGestures(
+                    haptic = haptic,
+                    onMove = onMove,
+                    onScroll = onScroll,
+                    onLeftClick = onLeftClick,
+                    onRightClick = onRightClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = stringResource(R.string.touchpad_hints),
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSecondary,
+                textAlign = TextAlign.Center,
             )
         }
     }

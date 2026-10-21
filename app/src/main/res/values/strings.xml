@@ -27,6 +27,8 @@
     <string name="remove_from_favorite">Remove from favorite</string>
     <string name="disconnect">Disconnect</string>
     <string name="edit_actions">Edit actions</string>
+    <string name="sensitivity">Sensitivity</string>
+    <string name="device_settings">Device settings</string>
     <string name="add_new">Add new</string>
     <string name="delete_action">Delete action</string>
     <string name="actions_connect_first">Connect to a PC first. Actions are per device.</string>
