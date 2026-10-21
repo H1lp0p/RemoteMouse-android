@@ -66,6 +66,7 @@ fun DeviceSelectionBottomSheet(
     onDismiss: () -> Unit,
     onCodeChange: (String) -> Unit,
     onConnectClick: () -> Unit,
+    onQrClick: () -> Unit = {},
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
 ) {
     ModalBottomSheet(
@@ -160,7 +161,13 @@ fun DeviceSelectionBottomSheet(
                     selected = selection.isSaved,
                     onClick = {},
                     enabled = false,
-                    label = { Text(stringResource(R.string.saved)) },
+                    label = {Text(
+                        if (selection.isSaved) {
+                            stringResource(R.string.saved)
+                        } else {
+                            stringResource(R.string.not_saved)
+                        }
+                    )},
                     leadingIcon = {
                         Icon(
                             imageVector = if (selection.isSaved) {
@@ -224,7 +231,7 @@ fun DeviceSelectionBottomSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         OutlinedButton(
-                            onClick = {},
+                            onClick = onQrClick,
                             modifier = Modifier.height(48.dp),
                             shape = RoundedCornerShape(24.dp),
                         ) {

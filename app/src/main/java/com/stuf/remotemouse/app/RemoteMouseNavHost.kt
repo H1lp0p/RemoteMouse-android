@@ -10,10 +10,9 @@ import com.stuf.remotemouse.ui.actions.ActionEditorScreen
 import com.stuf.remotemouse.ui.actions.ActionsScreen
 import com.stuf.remotemouse.ui.connecting.ConnectingScreen
 import com.stuf.remotemouse.ui.control.ControlScreen
-import com.stuf.remotemouse.ui.debug.DebugConnectScreen
 import com.stuf.remotemouse.ui.home.DeviceListScreen
 import com.stuf.remotemouse.ui.media.MediaScreen
-import com.stuf.remotemouse.ui.settings.SettingsScreen
+import com.stuf.remotemouse.ui.qr.QrScannerScreen
 import com.stuf.remotemouse.ui.text.TextInputScreen
 
 @Composable
@@ -25,16 +24,20 @@ fun RemoteMouseNavHost() {
     ) {
         composable(Routes.DEVICE_LIST) {
             DeviceListScreen(
-                onAddDevice = { navController.navigate(Routes.DEBUG_CONNECT) },
+                onOpenQrScanner = { navController.navigate(Routes.QR_SCANNER) },
                 onStartConnecting = { args ->
                     navController.navigate(Routes.connecting(args))
                 },
             )
         }
-        composable(Routes.DEBUG_CONNECT) {
-            DebugConnectScreen(
-                onConnected = { navController.navigate(Routes.CONTROL) },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+        composable(Routes.QR_SCANNER) {
+            QrScannerScreen(
+                onClose = { navController.popBackStack() },
+                onQrScanned = { args ->
+                    navController.navigate(Routes.connecting(args)) {
+                        popUpTo(Routes.DEVICE_LIST) { inclusive = false }
+                    }
+                },
             )
         }
         composable(
@@ -98,9 +101,6 @@ fun RemoteMouseNavHost() {
                 actionId = actionId,
                 onBack = { navController.popBackStack() },
             )
-        }
-        composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { navController.popBackStack() })
         }
     }
 }

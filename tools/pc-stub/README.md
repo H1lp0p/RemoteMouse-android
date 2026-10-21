@@ -13,7 +13,11 @@ pip install -r requirements.txt
 python main.py
 ```
 
-On start the console prints LAN IP, `device_id`, and a **6-digit CODE**.
+On start:
+- console prints LAN IP, persistent `device_id`, and a **6-digit CODE**
+- a separate window shows the **pairing QR** plus the same connection info
+
+`device_id` is stored in `.device_id` next to `main.py` and reused across restarts.
 
 Allow **TCP/UDP 12345** in Windows Firewall for private networks.
 
@@ -22,6 +26,7 @@ Allow **TCP/UDP 12345** in Windows Firewall for private networks.
 - UDP discovery on port `12345`
 - `GET /status`, `POST /pair`
 - WebSocket `/ws` (`heartbeat`, `save`, and logs all other commands)
+- **QR payload** (JSON): `device_id`, `device_name`, `ip`, `port`, `verification_code`
 - **Virtual mouse** on Windows via `SendInput`: `mouse_move`, `mouse_click`, `mouse_scroll`
   (keyboard / text are still no-op)
 

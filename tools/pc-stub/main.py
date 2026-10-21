@@ -1,6 +1,7 @@
 """
 Remote Mouse PC stub — FastAPI + UDP discovery for LAN testing.
 Implements REST /pair, /status and WebSocket /ws per project specs.
+Shows a pairing QR window on startup; device_id persists across restarts.
 """
 
 from __future__ import annotations
@@ -9,15 +10,19 @@ import asyncio
 import json
 import random
 import socket
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+import qrcode
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from PIL import Image, ImageTk
 
 import mouse_win
 
@@ -26,6 +31,17 @@ DEVICE_NAME = "Python Stub PC"
 MAX_CLIENTS = 5
 MAX_FAILED_ATTEMPTS = 5
 RATE_LIMIT_SECONDS = 30
+DEVICE_ID_FILE = Path(__file__).resolve().parent / ".device_id"
+
+
+def load_or_create_device_id() -> str:
+    if DEVICE_ID_FILE.exists():
+        stored = DEVICE_ID_FILE.read_text(encoding="utf-8").strip()
+        if stored:
+            return stored
+    device_id = str(uuid.uuid4())
+    DEVICE_ID_FILE.write_text(device_id + "\n", encoding="utf-8")
+    return device_id
 
 
 def log(kind: str, direction: str, peer: str, payload: Any) -> None:
@@ -65,7 +81,7 @@ class TrustedClient:
 
 @dataclass
 class StubState:
-    device_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    device_id: str = field(default_factory=load_or_create_device_id)
     verification_code: str = field(
         default_factory=lambda: f"{random.randint(0, 999999):06d}"
     )
@@ -93,6 +109,84 @@ media_subscribers: set[WebSocket] = set()
 text_subscribers: set[WebSocket] = set()
 _media_anchor_t: float = time.time()
 _media_anchor_pos: int = state.media_position
+
+
+def qr_payload() -> dict[str, Any]:
+    return {
+        "device_id": state.device_id,
+        "device_name": DEVICE_NAME,
+        "ip": local_ip(),
+        "port": PORT,
+        "verification_code": state.verification_code,
+    }
+
+
+def build_qr_image(payload: dict[str, Any], box_size: int = 8) -> Image.Image:
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=box_size,
+        border=2,
+    )
+    qr.add_data(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    qr.make(fit=True)
+    return qr.make_image(fill_color="black", back_color="white").convert("RGB")
+
+
+def open_qr_window() -> None:
+    """Show pairing QR + connection info in a separate Tk window."""
+    try:
+        import tkinter as tk
+        from tkinter import font as tkfont
+    except Exception as exc:
+        print(f"[QR  ] window unavailable: {exc}", flush=True)
+        # Keep the process alive for headless / server-only use.
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            return
+
+    payload = qr_payload()
+    image = build_qr_image(payload)
+
+    root = tk.Tk()
+    root.title("Remote Mouse — Pairing QR")
+    root.resizable(False, False)
+
+    frame = tk.Frame(root, padx=20, pady=16)
+    frame.pack(fill="both", expand=True)
+
+    title_font = tkfont.Font(family="Segoe UI", size=14, weight="bold")
+    body_font = tkfont.Font(family="Consolas", size=11)
+
+    tk.Label(frame, text=DEVICE_NAME, font=title_font).pack(anchor="w")
+    tk.Label(
+        frame,
+        text=(
+            f"device_id : {payload['device_id']}\n"
+            f"address   : {payload['ip']}:{payload['port']}\n"
+            f"CODE      : {payload['verification_code']}"
+        ),
+        font=body_font,
+        justify="left",
+        anchor="w",
+    ).pack(anchor="w", pady=(8, 12))
+
+    photo = ImageTk.PhotoImage(image)
+    qr_label = tk.Label(frame, image=photo)
+    qr_label.image = photo  # keep reference
+    qr_label.pack()
+
+    tk.Label(
+        frame,
+        text="Scan with the phone app (+ or QR-code).",
+        font=tkfont.Font(family="Segoe UI", size=10),
+        fg="#555555",
+    ).pack(anchor="w", pady=(12, 0))
+
+    root.protocol("WM_DELETE_WINDOW", root.destroy)
+    root.mainloop()
 
 
 def _effective_media_position() -> int:
@@ -230,6 +324,7 @@ async def lifespan(app: FastAPI):
         allow_broadcast=True,
     )
     ip = local_ip()
+    payload = qr_payload()
     print("=" * 60, flush=True)
     print("Remote Mouse Python stub is running", flush=True)
     print(f"  LAN IP     : {ip}", flush=True)
@@ -237,11 +332,12 @@ async def lifespan(app: FastAPI):
     print(f"  UDP port   : {PORT}", flush=True)
     print(f"  device_id  : {state.device_id}", flush=True)
     print(f"  CODE       : {state.verification_code}", flush=True)
+    print(f"  QR JSON    : {json.dumps(payload, ensure_ascii=False)}", flush=True)
     if mouse_win.is_available():
         print("  Mouse emu  : ON (Win32 SendInput)", flush=True)
     else:
         print("  Mouse emu  : OFF (non-Windows host)", flush=True)
-    print("Open the debug connect screen on the phone and tap Search.", flush=True)
+    print("Scan the QR window or use UDP discovery + code on the phone.", flush=True)
     print("=" * 60, flush=True)
     try:
         yield
@@ -536,7 +632,14 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 def main() -> None:
-    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
+    # Uvicorn on a background thread; Tk QR window owns the main thread (Windows-friendly).
+    server = threading.Thread(
+        target=lambda: uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning"),
+        name="uvicorn",
+        daemon=True,
+    )
+    server.start()
+    open_qr_window()
 
 
 if __name__ == "__main__":

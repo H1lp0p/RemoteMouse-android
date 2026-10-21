@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -43,6 +44,8 @@ data class DeviceListUiState(
     val sheetStep: DeviceSheetStep = DeviceSheetStep.Overview,
     val verificationCode: String = "",
     val sheetError: String? = null,
+    val showRenameSheet: Boolean = false,
+    val renameDraft: String = "",
 )
 
 @HiltViewModel
@@ -56,6 +59,10 @@ class DeviceListViewModel @Inject constructor(
 
     val favorites: StateFlow<List<PcDeviceEntity>> = deviceRepository.observeDevices()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val clientName: StateFlow<String> = identityRepository.observeMe()
+        .map { it?.clientName.orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     init {
         viewModelScope.launch { identityRepository.ensureMe() }
@@ -190,6 +197,27 @@ class DeviceListViewModel @Inject constructor(
                         verificationCode = code,
                     ),
                 )
+            }
+        }
+    }
+
+    fun openRenameSheet() {
+        viewModelScope.launch {
+            val name = identityRepository.ensureMe().clientName
+            _ui.update { it.copy(showRenameSheet = true, renameDraft = name) }
+        }
+    }
+
+    fun onRenameDraftChange(value: String) {
+        _ui.update { it.copy(renameDraft = value) }
+    }
+
+    fun dismissRenameSheet(save: Boolean = true) {
+        val draft = _ui.value.renameDraft
+        _ui.update { it.copy(showRenameSheet = false) }
+        if (save) {
+            viewModelScope.launch {
+                identityRepository.updateClientName(draft)
             }
         }
     }

@@ -6,7 +6,7 @@ import com.stuf.remotemouse.ui.connecting.ConnectingViewModel
 
 object Routes {
     const val DEVICE_LIST = "device_list"
-    const val DEBUG_CONNECT = "debug_connect"
+    const val QR_SCANNER = "qr_scanner"
     const val CONNECTING =
         "connecting/{mode}/{deviceId}/{deviceName}?ip={ip}&port={port}&code={code}"
     const val CONTROL = "control"
@@ -14,7 +14,6 @@ object Routes {
     const val MEDIA = "media"
     const val ACTIONS = "actions"
     const val ACTION_EDITOR = "action_editor/{actionId}"
-    const val SETTINGS = "settings"
 
     fun actionEditor(actionId: Long = -1L) = "action_editor/$actionId"
 

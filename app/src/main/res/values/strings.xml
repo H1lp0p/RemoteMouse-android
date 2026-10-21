@@ -12,6 +12,7 @@
     <string name="connect">Connect</string>
     <string name="enter_code">Enter code</string>
     <string name="saved">Saved</string>
+    <string name="not_saved">Not saved</string>
     <string name="not_available">Not available</string>
     <string name="available">Available</string>
     <string name="pairing">Connecting…</string>
@@ -65,4 +66,8 @@
     <string name="action_danger_message">Action %1$s do some crazy stuff. You realy want it?</string>
     <string name="action_danger_nope">Nope</string>
     <string name="action_danger_yes">Yes</string>
+    <string name="edit_device_name">Edit device name</string>
+    <string name="device_name_label">Device name</string>
+    <string name="close">Close</string>
+    <string name="camera_permission_required">Camera permission is required to scan QR codes</string>
 </resources>

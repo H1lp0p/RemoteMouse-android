@@ -15,3 +15,5 @@
 local.properties
 
 /.docs
+tools/pc-stub/.device_id
+tools/pc-stub/.venv/
