@@ -1,11 +1,21 @@
 package com.stuf.remotemouse.data.remote
 
+import android.os.SystemClock
 import com.stuf.remotemouse.data.remote.dto.ContextChangeDto
 import com.stuf.remotemouse.data.remote.dto.MediaUpdateDto
 import com.stuf.remotemouse.data.remote.dto.SaveSuccessDto
 import com.stuf.remotemouse.data.remote.dto.TextUpdateDto
 import com.stuf.remotemouse.data.remote.dto.VolumeUpdateDto
 import com.stuf.remotemouse.data.remote.dto.WsErrorDto
+import java.io.IOException
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.UnknownHostException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -61,7 +71,6 @@ class CommandSocket @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
-    private var moveFlushJob: Job? = null
     private val intentionalClose = AtomicBoolean(false)
     private var activeGeneration = 0
     private val _remoteClosed = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
@@ -70,11 +79,20 @@ class CommandSocket @Inject constructor(
      * `true` — peer sent a close frame. `false` — transport failure.
      */
     val remoteClosed: SharedFlow<Boolean> = _remoteClosed.asSharedFlow()
-    private val moveLock = Any()
-    private var pendingMoveDx = 0f
-    private var pendingMoveDy = 0f
-    /** Last mouse_move RTT (ms) measured on this device via mouse_move_ack. Debug only. */
-    @Volatile private var lastMouseMoveRttMs: Long? = null
+
+    private val ioLock = Any()
+    /** One thread so datagrams leave in gesture order and never on the main thread. */
+    private val udpSender = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "remote-mouse-udp").apply { isDaemon = true }
+    }
+    private var udpSocket: DatagramSocket? = null
+    private var remoteAddress: InetSocketAddress? = null
+    private var sessionId: Int = 0
+    /** Sub-pixel remainder shared by the touchpad and the stick. It is not a send batch. */
+    private var remainderDx = 0f
+    private var remainderDy = 0f
+    /** Timestamp of the last mouse datagram. Scroll and click fence on this, not on "now". */
+    private var lastMouseTimestamp: Long? = null
 
     private val _state = MutableStateFlow(WsConnectionState.Disconnected)
     val state: StateFlow<WsConnectionState> = _state.asStateFlow()
@@ -86,18 +104,28 @@ class CommandSocket @Inject constructor(
     )
     val events: SharedFlow<ServerEvent> = _events.asSharedFlow()
 
-    fun connect(url: String) {
+    fun connect(url: String, udpHost: String, udpPort: Int, sessionId: Int) {
         disconnect()
         val generation = ++activeGeneration
         intentionalClose.set(false)
-        _state.value = WsConnectionState.Connecting
-        val request = Request.Builder().url(url).build()
-        webSocket = okHttpClient.newWebSocket(request, SocketListener(generation))
+        synchronized(ioLock) {
+            this.sessionId = sessionId and 0xFFFF
+        }
+        try {
+            openUdp(udpHost, udpPort)
+            _state.value = WsConnectionState.Connecting
+            val request = Request.Builder().url(url).build()
+            webSocket = okHttpClient.newWebSocket(request, SocketListener(generation))
+        } catch (t: Throwable) {
+            closeUdp()
+            _state.value = WsConnectionState.Disconnected
+            throw t
+        }
     }
 
     fun disconnect() {
         intentionalClose.set(true)
-        stopMoveBatching(sendPending = false)
+        closeUdp()
         heartbeatJob?.cancel()
         heartbeatJob = null
         webSocket?.close(1000, "client disconnect")
@@ -118,82 +146,45 @@ class CommandSocket @Inject constructor(
     )
 
     /**
-     * Accumulates move deltas and flushes ~every [MOVE_BATCH_INTERVAL_MS].
-     * Fractional pixels stay in the accumulator until they make a whole pixel.
-     * Call [flushMouseMove] before clicks/scroll so the cursor is up to date.
+     * Touchpad sample. Adds the already-scaled delta to the fractional remainder,
+     * then sends one mouse datagram if at least one whole pixel is available.
      */
     fun mouseMove(dx: Float, dy: Float) {
         if (dx == 0f && dy == 0f) return
-        synchronized(moveLock) {
-            pendingMoveDx += dx
-            pendingMoveDy += dy
+        synchronized(ioLock) {
+            remainderDx += dx
+            remainderDy += dy
+            sendPendingMouse()
         }
-        ensureMoveFlushLoop()
     }
 
     /**
-     * Stick: one tick of velocity, added to the same sub-pixel accumulator.
-     * Zero clears the accumulator (finger up).
+     * One stick tick. The caller integrates velocity on its own ~16 ms loop.
+     * Uses the same remainder as [mouseMove]. A zero delta leaves that remainder in place.
      */
     fun setMouseMoveVelocity(dx: Float, dy: Float) {
-        synchronized(moveLock) {
-            if (dx == 0f && dy == 0f) {
-                pendingMoveDx = 0f
-                pendingMoveDy = 0f
-            } else {
-                pendingMoveDx += dx
-                pendingMoveDy += dy
-            }
-        }
-        if (dx != 0f || dy != 0f) {
-            ensureMoveFlushLoop()
-        }
-    }
-
-    fun flushMouseMove() {
-        val (dx, dy) = synchronized(moveLock) {
-            val ix = pendingMoveDx.toInt()
-            val iy = pendingMoveDy.toInt()
-            pendingMoveDx -= ix
-            pendingMoveDy -= iy
-            ix to iy
-        }
-        if (dx == 0 && dy == 0) return
-        sendJson(
-            buildJsonObject {
-                put("type", "mouse_move")
-                put("dx", dx)
-                put("dy", dy)
-                // Not in AsyncAPI — debug only; strip by flipping [DEBUG_MOUSE_MOVE_LATENCY].
-                if (DEBUG_MOUSE_MOVE_LATENCY) {
-                    put("timestamp", System.currentTimeMillis())
-                    lastMouseMoveRttMs?.let { put("prev_rtt_ms", it) }
-                }
-            },
-        )
+        mouseMove(dx, dy)
     }
 
     fun mouseClick(button: String, action: String): Boolean {
-        flushMouseMove()
+        val inputTime = inputTimeAfterFlush()
         return sendJson(
             buildJsonObject {
                 put("type", "mouse_click")
                 put("button", button)
                 put("action", action)
+                if (inputTime != null) put("input_time", inputTime)
             },
         )
     }
 
-    fun mouseScroll(deltaY: Int, deltaX: Int = 0): Boolean {
-        flushMouseMove()
-        return sendJson(
-            buildJsonObject {
-                put("type", "mouse_scroll")
-                put("delta_x", deltaX)
-                put("delta_y", deltaY)
-            },
-        )
-    }
+    fun mouseScroll(deltaY: Int, deltaX: Int = 0): Boolean = sendJson(
+        buildJsonObject {
+            put("type", "mouse_scroll")
+            put("delta_x", deltaX)
+            put("delta_y", deltaY)
+        },
+    )
 
     fun textInput(text: String) = sendJson(
         buildJsonObject {
@@ -222,12 +213,13 @@ class CommandSocket @Inject constructor(
         },
     )
 
-    fun volumeSet(level: Int) = sendJson(
-        buildJsonObject {
-            put("type", "volume_set")
-            put("level", level)
-        },
-    )
+    /** Absolute level 0..100 over UDP. */
+    fun volumeSet(level: Int): Boolean = synchronized(ioLock) {
+        val clamped = level.coerceIn(0, 100)
+        writeDatagram(OPCODE_VOLUME, 1) {
+            put(clamped.toByte())
+        } != null
+    }
 
     fun volumeStep(direction: String) = sendJson(
         buildJsonObject {
@@ -246,12 +238,22 @@ class CommandSocket @Inject constructor(
     fun mediaPlayPause() = sendJson(buildJsonObject { put("type", "media_play_pause") })
     fun mediaNext() = sendJson(buildJsonObject { put("type", "media_next") })
     fun mediaPrev() = sendJson(buildJsonObject { put("type", "media_prev") })
+
+    /** Relative seek, seconds. WebSocket. */
     fun mediaSeek(seconds: Int) = sendJson(
         buildJsonObject {
             put("type", "media_seek")
             put("seconds", seconds)
         },
     )
+
+    /** Absolute playback position, seconds. UDP. */
+    fun seekAbsolute(positionSeconds: Int): Boolean = synchronized(ioLock) {
+        val pos = positionSeconds.coerceIn(0, 0xFFFF)
+        writeDatagram(OPCODE_SEEK, 2) {
+            putShort(pos.toShort())
+        } != null
+    }
 
     fun mediaSubscribe() = sendJson(buildJsonObject { put("type", "media_subscribe") })
     fun mediaUnsubscribe() = sendJson(buildJsonObject { put("type", "media_unsubscribe") })
@@ -273,33 +275,104 @@ class CommandSocket @Inject constructor(
         }
     }
 
-    private fun ensureMoveFlushLoop() {
-        if (moveFlushJob?.isActive == true) return
-        moveFlushJob = scope.launch {
-            while (isActive && _state.value == WsConnectionState.Connected) {
-                delay(MOVE_BATCH_INTERVAL_MS)
-                flushMouseMove()
-                val idle = synchronized(moveLock) {
-                    pendingMoveDx.toInt() == 0 && pendingMoveDy.toInt() == 0
-                }
-                if (idle) break
-            }
-            moveFlushJob = null
+    private fun openUdp(host: String, port: Int) {
+        val address = InetAddress.getByName(host) ?: throw UnknownHostException(host)
+        val remote = InetSocketAddress(address, port)
+        // Bind an IPv4 socket and do not call connect(). On Android, connect() on an
+        // unbound dual-stack datagram socket throws with an empty message.
+        val socket = DatagramSocket(null)
+        try {
+            socket.reuseAddress = true
+            socket.bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), 0))
+        } catch (t: Throwable) {
+            socket.close()
+            throw t
+        }
+        synchronized(ioLock) {
+            udpSocket?.close()
+            udpSocket = socket
+            remoteAddress = remote
         }
     }
 
-    private fun stopMoveBatching(sendPending: Boolean) {
-        moveFlushJob?.cancel()
-        moveFlushJob = null
-        if (sendPending) {
-            flushMouseMove()
-        } else {
-            synchronized(moveLock) {
-                pendingMoveDx = 0f
-                pendingMoveDy = 0f
-            }
+    private fun closeUdp() {
+        synchronized(ioLock) {
+            udpSocket?.close()
+            udpSocket = null
+            remoteAddress = null
+            remainderDx = 0f
+            remainderDy = 0f
+            lastMouseTimestamp = null
         }
     }
+
+    /**
+     * Flushes a pending mouse datagram, then returns the timestamp of the last one sent.
+     * A pure scroll has no newer mouse sample, so the PC must not wait for "now".
+     */
+    private fun inputTimeAfterFlush(): Long? = synchronized(ioLock) {
+        sendPendingMouse()
+        lastMouseTimestamp
+    }
+
+    /** Caller holds [ioLock]. Sends at most one mouse datagram. */
+    private fun sendPendingMouse(): Boolean {
+        if (udpSocket == null) return false
+        val (dx, dy) = takeWholePixels()
+        if (dx == 0 && dy == 0) return false
+        val stamped = writeDatagram(OPCODE_MOUSE_MOVE, 4) {
+            putShort(dx.toShort())
+            putShort(dy.toShort())
+        } ?: return false
+        lastMouseTimestamp = stamped
+        return true
+    }
+
+    /**
+     * Caller holds [ioLock].
+     * Truncates toward zero so the fractional part stays on [remainderDx] / [remainderDy].
+     */
+    private fun takeWholePixels(): Pair<Int, Int> {
+        val ix = remainderDx.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+        val iy = remainderDy.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+        if (ix == 0 && iy == 0) return 0 to 0
+        remainderDx -= ix
+        remainderDy -= iy
+        return ix to iy
+    }
+
+    /**
+     * Caller holds [ioLock]. Builds the frame here and hands the send to [udpSender].
+     * Header is opcode, session id, elapsedRealtime low 32, little-endian.
+     */
+    private fun writeDatagram(
+        opcode: Int,
+        payloadSize: Int,
+        writePayload: ByteBuffer.() -> Unit,
+    ): Long? {
+        val socket = udpSocket ?: return null
+        val remote = remoteAddress ?: return null
+        val address = remote.address ?: return null
+        val port = remote.port
+        val timestamp = elapsedTimestamp()
+        val buf = ByteBuffer.allocate(HEADER_SIZE + payloadSize).order(ByteOrder.LITTLE_ENDIAN)
+        buf.put(opcode.toByte())
+        buf.putShort(sessionId.toShort())
+        buf.putInt(timestamp.toInt())
+        buf.writePayload()
+        check(buf.position() == buf.capacity())
+        val data = buf.array()
+        udpSender.execute {
+            try {
+                socket.send(DatagramPacket(data, data.size, address, port))
+            } catch (_: IOException) {
+                // The socket was closed or the network dropped this datagram.
+            }
+        }
+        return timestamp
+    }
+
+    private fun elapsedTimestamp(): Long = SystemClock.elapsedRealtime() and 0xFFFFFFFFL
 
     private inner class SocketListener(
         private val generation: Int,
@@ -339,7 +412,7 @@ class CommandSocket @Inject constructor(
     }
 
     private fun markSocketGone(closedByPeer: Boolean) {
-        stopMoveBatching(sendPending = false)
+        closeUdp()
         heartbeatJob?.cancel()
         heartbeatJob = null
         _state.value = WsConnectionState.Disconnected
@@ -377,12 +450,6 @@ class CommandSocket @Inject constructor(
                 val ts = obj["timestamp"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
                 _events.emit(ServerEvent.HeartbeatAck(ts))
             }
-            // Debug-only ack for mouse_move RTT (not in AsyncAPI).
-            "mouse_move_ack" -> {
-                if (!DEBUG_MOUSE_MOVE_LATENCY) return
-                val ts = obj["timestamp"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return
-                lastMouseMoveRttMs = (System.currentTimeMillis() - ts).coerceAtLeast(0L)
-            }
             "error" -> {
                 val dto = json.decodeFromJsonElement(WsErrorDto.serializer(), obj)
                 _events.emit(ServerEvent.Error(dto.code, dto.message))
@@ -392,14 +459,9 @@ class CommandSocket @Inject constructor(
     }
 
     companion object {
-        /** Accumulate mouse deltas and flush about once per frame (~16ms). */
-        const val MOVE_BATCH_INTERVAL_MS = 16L
-
-        /**
-         * Debug: measure mouse_move RTT via timestamp + stub `mouse_move_ack`.
-         * Also piggybacks `prev_rtt_ms` on the next move so the stub can log real RTT.
-         * Not part of AsyncAPI — set to `false` to disable.
-         */
-        const val DEBUG_MOUSE_MOVE_LATENCY = true
+        private const val HEADER_SIZE = 7
+        private const val OPCODE_MOUSE_MOVE = 0x01
+        private const val OPCODE_VOLUME = 0x02
+        private const val OPCODE_SEEK = 0x03
     }
 }

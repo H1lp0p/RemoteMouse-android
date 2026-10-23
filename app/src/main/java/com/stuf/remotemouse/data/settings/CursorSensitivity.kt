@@ -36,7 +36,7 @@ class CursorSensitivity @Inject constructor(
         _coefficient.value = value.coerceIn(MIN, MAX)
     }
 
-    /** Scaled deltas. Whole pixels are taken later, when the move batch is sent. */
+    /** Scaled deltas. Whole pixels are taken from the fractional remainder when a move is sent. */
     fun scale(dx: Float, dy: Float): Pair<Float, Float> {
         val sens = _coefficient.value
         return dx * sens to dy * sens

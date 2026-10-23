@@ -18,4 +18,6 @@ data class ActiveSession(
     val deviceName: String,
     val ip: String,
     val port: Int,
+    val sessionId: Int,
+    val udpPort: Int,
 )

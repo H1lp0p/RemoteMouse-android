@@ -4,9 +4,12 @@ import com.stuf.remotemouse.data.identity.IdentityRepository
 import com.stuf.remotemouse.data.local.repo.ActionRepository
 import com.stuf.remotemouse.data.local.repo.DeviceRepository
 import com.stuf.remotemouse.data.settings.CursorSensitivity
+import com.stuf.remotemouse.data.remote.dto.DEFAULT_UDP_PORT
 import com.stuf.remotemouse.data.remote.dto.ErrorResponseDto
 import com.stuf.remotemouse.data.remote.dto.FingerprintDto
+import com.stuf.remotemouse.data.remote.dto.PROTOCOL_VERSION
 import com.stuf.remotemouse.data.remote.dto.PairingRequestDto
+import com.stuf.remotemouse.data.remote.dto.PairingResponseDto
 import com.stuf.remotemouse.domain.ActiveSession
 import com.stuf.remotemouse.domain.PairingException
 import javax.inject.Inject
@@ -68,6 +71,7 @@ class ConnectionOrchestrator @Inject constructor(
         val me = identityRepository.ensureMe()
         val api = apiFor(ip, port)
         val body = PairingRequestDto(
+            protocolVersion = PROTOCOL_VERSION,
             pairingMode = "new",
             deviceId = deviceId,
             clientId = me.clientId,
@@ -75,10 +79,17 @@ class ConnectionOrchestrator @Inject constructor(
             fingerprint = me.toFingerprintDto(),
             verificationCode = verificationCode,
         )
-        executePair(api, body)
-        openSocket(ip, port)
+        val paired = executePair(api, body)
+        openSocket(ip, port, paired.sessionId, paired.udpPort)
         actionRepository.ensureDefaultActions(deviceId)
-        val active = ActiveSession(deviceId, deviceName, ip, port)
+        val active = ActiveSession(
+            deviceId = deviceId,
+            deviceName = deviceName,
+            ip = ip,
+            port = port,
+            sessionId = paired.sessionId,
+            udpPort = paired.udpPort,
+        )
         _session.value = active
         return active
     }
@@ -100,23 +111,31 @@ class ConnectionOrchestrator @Inject constructor(
 
         val api = apiFor(ip, port)
         val body = PairingRequestDto(
+            protocolVersion = PROTOCOL_VERSION,
             pairingMode = "saved",
             deviceId = deviceId,
             clientId = me.clientId,
             clientName = me.clientName,
             fingerprint = me.toFingerprintDto(),
         )
-        try {
+        val paired = try {
             executePair(api, body)
         } catch (e: PairingException.DeviceNotTrusted) {
             deviceRepository.delete(deviceId)
             throw e
         }
 
-        openSocket(ip, port)
+        openSocket(ip, port, paired.sessionId, paired.udpPort)
         deviceRepository.touch(deviceId, ip, port)
         actionRepository.ensureDefaultActions(deviceId)
-        val active = ActiveSession(deviceId, saved.name, ip, port)
+        val active = ActiveSession(
+            deviceId = deviceId,
+            deviceName = saved.name,
+            ip = ip,
+            port = port,
+            sessionId = paired.sessionId,
+            udpPort = paired.udpPort,
+        )
         _session.value = active
         return active
     }
@@ -129,7 +148,9 @@ class ConnectionOrchestrator @Inject constructor(
         val session = _session.value ?: return
         when (commandSocket.state.value) {
             WsConnectionState.Connected, WsConnectionState.Connecting -> return
-            WsConnectionState.Disconnected -> openSocket(session.ip, session.port)
+            WsConnectionState.Disconnected -> runCatching {
+                openSocket(session.ip, session.port, session.sessionId, session.udpPort)
+            }
         }
     }
 
@@ -167,8 +188,18 @@ class ConnectionOrchestrator @Inject constructor(
 
     fun socket(): CommandSocket = commandSocket
 
-    private fun openSocket(ip: String, port: Int) {
-        commandSocket.connect(wsUrl(ip, port))
+    private fun openSocket(ip: String, port: Int, sessionId: Int, udpPort: Int) {
+        try {
+            commandSocket.connect(
+                url = wsUrl(ip, port),
+                udpHost = ip,
+                udpPort = udpPort,
+                sessionId = sessionId,
+            )
+        } catch (e: Exception) {
+            val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+            throw PairingException.Network("Failed to open UDP: $detail")
+        }
     }
 
     private fun apiFor(ip: String, port: Int): PairingApi =
@@ -177,13 +208,15 @@ class ConnectionOrchestrator @Inject constructor(
             .build()
             .create(PairingApi::class.java)
 
-    private suspend fun executePair(api: PairingApi, body: PairingRequestDto) {
+    private suspend fun executePair(api: PairingApi, body: PairingRequestDto): V2Pair {
         val response = try {
             api.pair(body)
         } catch (e: Exception) {
             throw PairingException.Network(e.message ?: "Pair request failed")
         }
-        if (response.isSuccessful) return
+        if (response.isSuccessful) {
+            return readV2Pair(response.body())
+        }
 
         val errorBody = response.errorBody()?.string().orEmpty()
         val error = runCatching {
@@ -203,10 +236,28 @@ class ConnectionOrchestrator @Inject constructor(
                     throw PairingException.InvalidCode(error.message ?: "invalid code")
                 }
                 throw PairingException.Unexpected(
-                    error?.message ?: "Pair failed: HTTP ${response.code()}",
+                    error?.message ?: error?.error ?: "Pair failed: HTTP ${response.code()}",
                 )
             }
         }
+    }
+
+    private fun readV2Pair(body: PairingResponseDto?): V2Pair {
+        val parsed = body ?: throw PairingException.Unexpected("Empty pair response")
+        if (parsed.protocolVersion != PROTOCOL_VERSION) {
+            val reported = parsed.protocolVersion?.toString() ?: "missing"
+            throw PairingException.Unexpected("Server protocol version $reported is not supported")
+        }
+        val sessionId = parsed.sessionId
+            ?: throw PairingException.Unexpected("Pair response missing session_id")
+        if (sessionId !in 0..0xFFFF) {
+            throw PairingException.Unexpected("Pair response session_id out of range")
+        }
+        val udpPort = parsed.udpPort ?: DEFAULT_UDP_PORT
+        if (udpPort !in 1..65535) {
+            throw PairingException.Unexpected("Pair response udp_port out of range")
+        }
+        return V2Pair(sessionId = sessionId, udpPort = udpPort)
     }
 
     private fun com.stuf.remotemouse.data.local.entity.MeEntity.toFingerprintDto() =
@@ -217,3 +268,8 @@ class ConnectionOrchestrator @Inject constructor(
             osVersion = osVersion,
         )
 }
+
+private data class V2Pair(
+    val sessionId: Int,
+    val udpPort: Int,
+)

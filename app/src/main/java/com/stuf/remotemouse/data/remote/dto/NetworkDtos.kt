@@ -2,6 +2,16 @@ package com.stuf.remotemouse.data.remote.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+/** Only protocol this client speaks. The pair body sends this single value, never a list. */
+const val PROTOCOL_VERSION = 2
+
+/**
+ * UDP command port used only when a version-2 pair response omits `udp_port`.
+ * A port present in the response always wins.
+ */
+const val DEFAULT_UDP_PORT = 12346
+
 @Serializable
 data class FingerprintDto(
     @SerialName("android_id") val androidId: String,
@@ -12,6 +22,7 @@ data class FingerprintDto(
 
 @Serializable
 data class PairingRequestDto(
+    @SerialName("protocol_version") val protocolVersion: Int = PROTOCOL_VERSION,
     @SerialName("pairing_mode") val pairingMode: String,
     @SerialName("device_id") val deviceId: String,
     @SerialName("client_id") val clientId: String,
@@ -29,6 +40,9 @@ data class ServerInfoDto(
 @Serializable
 data class PairingResponseDto(
     val paired: Boolean,
+    @SerialName("protocol_version") val protocolVersion: Int? = null,
+    @SerialName("session_id") val sessionId: Int? = null,
+    @SerialName("udp_port") val udpPort: Int? = null,
     @SerialName("server_info") val serverInfo: ServerInfoDto? = null,
 )
 

@@ -282,7 +282,8 @@ class ControlViewModel @Inject constructor(
                         orchestrator.socket().mouseScroll(deltaY = dy, deltaX = dx)
                     }
                 } else {
-                    // Full deflection (~120–150px) → ~15–25px cursor / 16ms tick
+                    // Full deflection (~120–150px) → ~15–25px cursor / 16ms tick.
+                    // This tick is the integrator; each whole-pixel step is one UDP move.
                     val scale = 0.14f * sensitivity.value
                     orchestrator.socket().setMouseMoveVelocity(ox * scale, oy * scale)
                 }
@@ -345,11 +346,11 @@ class ControlViewModel @Inject constructor(
     fun mediaSeekAbsolute(positionSeconds: Int) {
         val current = _ui.value.media
         val duration = current?.durationSeconds?.coerceAtLeast(0) ?: 0
-        val target = positionSeconds.coerceIn(0, duration.coerceAtLeast(0))
-        val delta = target - (current?.positionSeconds ?: 0)
-        if (delta != 0) {
-            orchestrator.socket().mediaSeek(delta)
+        var target = positionSeconds.coerceIn(0, 0xFFFF)
+        if (duration > 0) {
+            target = target.coerceAtMost(duration)
         }
+        orchestrator.socket().seekAbsolute(target)
         if (current != null) {
             _ui.update { it.copy(media = current.copy(positionSeconds = target)) }
         }

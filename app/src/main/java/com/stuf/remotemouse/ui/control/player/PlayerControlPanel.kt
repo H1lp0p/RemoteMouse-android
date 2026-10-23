@@ -115,6 +115,7 @@ fun PlayerControlPanel(
                         if (!canSeek) return@Slider
                         sliderDragging = true
                         sliderValue = value
+                        onSeekAbsolute(value.toInt())
                     },
                     onValueChangeFinished = {
                         if (sliderDragging && canSeek) {
