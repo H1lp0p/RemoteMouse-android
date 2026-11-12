@@ -9,13 +9,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import kotlin.math.hypot
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val HoldTimeoutMs = 420L
-private const val DoubleTapTimeoutMs = 280L
 private const val MoveSlopPx = 18f
 
 private enum class TouchMode {
@@ -29,10 +27,7 @@ fun Modifier.touchpadGestures(
     onMove: (dx: Float, dy: Float) -> Unit,
     onScroll: (dy: Float) -> Unit,
     onLeftClick: () -> Unit,
-    onRightClick: () -> Unit,
 ): Modifier = pointerInput(Unit) {
-    var pendingSingleTap: Job? = null
-
     coroutineScope {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
@@ -57,23 +52,7 @@ fun Modifier.touchpadGestures(
                     holdJob.cancel()
 
                     val isTap = mode == TouchMode.Pending && totalTravel < MoveSlopPx
-                    if (isTap) {
-                        val existing = pendingSingleTap
-                        if (existing != null && existing.isActive) {
-                            existing.cancel()
-                            pendingSingleTap = null
-                            onRightClick()
-                        } else {
-                            pendingSingleTap = launch {
-                                delay(DoubleTapTimeoutMs)
-                                pendingSingleTap = null
-                                onLeftClick()
-                            }
-                        }
-                    } else {
-                        pendingSingleTap?.cancel()
-                        pendingSingleTap = null
-                    }
+                    if (isTap) onLeftClick()
                     break
                 }
 
@@ -87,8 +66,6 @@ fun Modifier.touchpadGestures(
                             if (mode != TouchMode.Move) {
                                 mode = TouchMode.Move
                                 holdJob.cancel()
-                                pendingSingleTap?.cancel()
-                                pendingSingleTap = null
                             }
                             onMove(delta.x, delta.y)
                         }

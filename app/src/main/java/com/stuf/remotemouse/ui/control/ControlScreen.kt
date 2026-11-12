@@ -38,6 +38,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stuf.remotemouse.R
 import com.stuf.remotemouse.ui.control.mouse.MouseControlPanel
+import com.stuf.remotemouse.ui.control.pad.ActionPadPanel
 import com.stuf.remotemouse.ui.control.player.PlayerControlPanel
 import com.stuf.remotemouse.ui.control.stick.StickControlPanel
 import com.stuf.remotemouse.ui.control.text.TextControlPanel
@@ -50,6 +51,7 @@ fun ControlScreen(
     val session by viewModel.session.collectAsStateWithLifecycle()
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val actions by viewModel.actions.collectAsStateWithLifecycle()
+    val padSlots by viewModel.padSlots.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner) {
@@ -166,6 +168,14 @@ fun ControlScreen(
                         onTextChange = viewModel::onSharedTextChange,
                         modifier = Modifier.fillMaxSize(),
                     )
+                    ControlMode.Pad -> ActionPadPanel(
+                        slots = padSlots,
+                        actions = actions,
+                        onAssign = viewModel::assignPadSlot,
+                        onClear = viewModel::clearPadSlot,
+                        onRun = viewModel::runAction,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
             }
         }
@@ -220,6 +230,12 @@ private fun ControlModeChips(
             labelRes = R.string.control_mode_text,
             iconRes = R.drawable.ic_control_text,
             onClick = { onSelect(ControlMode.Text) },
+        )
+        ControlModeChip(
+            selected = selected == ControlMode.Pad,
+            labelRes = R.string.control_mode_pad,
+            iconRes = R.drawable.ic_control_pad,
+            onClick = { onSelect(ControlMode.Pad) },
         )
     }
 }

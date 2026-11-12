@@ -1,9 +1,12 @@
 package com.stuf.remotemouse.data.local.repo
 
 import com.stuf.remotemouse.data.local.dao.ActionDao
+import com.stuf.remotemouse.data.local.dao.ActionPadDao
 import com.stuf.remotemouse.data.local.dao.ActionStepDao
 import com.stuf.remotemouse.data.local.dao.PcDeviceDao
+import com.stuf.remotemouse.data.local.entity.ACTION_PAD_SLOT_COUNT
 import com.stuf.remotemouse.data.local.entity.ActionEntity
+import com.stuf.remotemouse.data.local.entity.ActionPadSlotEntity
 import com.stuf.remotemouse.data.local.entity.ActionStepEntity
 import com.stuf.remotemouse.data.local.entity.ActionWithSteps
 import com.stuf.remotemouse.data.local.entity.PcDeviceEntity
@@ -11,6 +14,7 @@ import com.stuf.remotemouse.domain.VkCodes
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 @Singleton
 class DeviceRepository @Inject constructor(
@@ -70,6 +74,7 @@ class DeviceRepository @Inject constructor(
 class ActionRepository @Inject constructor(
     private val actionDao: ActionDao,
     private val actionStepDao: ActionStepDao,
+    private val actionPadDao: ActionPadDao,
 ) {
     fun observeActions(deviceId: String): Flow<List<ActionEntity>> =
         actionDao.observeByDevice(deviceId)
@@ -79,6 +84,21 @@ class ActionRepository @Inject constructor(
 
     fun observeSteps(actionId: Long): Flow<List<ActionStepEntity>> =
         actionStepDao.observeByAction(actionId)
+
+    fun observePadSlots(deviceId: String): Flow<List<Long?>> =
+        actionPadDao.observe(deviceId).map { rows ->
+            val bySlot = rows.associate { it.slot to it.actionId }
+            List(ACTION_PAD_SLOT_COUNT) { index -> bySlot[index] }
+        }
+
+    suspend fun setPadSlot(deviceId: String, slot: Int, actionId: Long?) {
+        if (slot !in 0 until ACTION_PAD_SLOT_COUNT) return
+        if (actionId == null) {
+            actionPadDao.clear(deviceId, slot)
+        } else {
+            actionPadDao.upsert(ActionPadSlotEntity(deviceId, slot, actionId))
+        }
+    }
 
     suspend fun getActionWithSteps(actionId: Long): ActionWithSteps? {
         val action = actionDao.getById(actionId) ?: return null
@@ -92,10 +112,25 @@ class ActionRepository @Inject constructor(
         steps: List<Pair<String, String>>,
     ): Long {
         val id = if (actionId > 0) {
-            actionDao.upsert(ActionEntity(id = actionId, deviceId = deviceId, name = name))
+            val existing = actionDao.getById(actionId)
+            actionDao.upsert(
+                ActionEntity(
+                    id = actionId,
+                    deviceId = deviceId,
+                    name = name,
+                    sortOrder = existing?.sortOrder ?: 0,
+                ),
+            )
             actionId
         } else {
-            actionDao.upsert(ActionEntity(deviceId = deviceId, name = name))
+            val sortOrder = actionDao.maxSortOrder(deviceId) + 1
+            actionDao.upsert(
+                ActionEntity(
+                    deviceId = deviceId,
+                    name = name,
+                    sortOrder = sortOrder,
+                ),
+            )
         }
         actionStepDao.deleteByAction(id)
         actionStepDao.upsertAll(
@@ -112,7 +147,15 @@ class ActionRepository @Inject constructor(
     }
 
     suspend fun deleteAction(actionId: Long) {
+        val existing = actionDao.getById(actionId) ?: return
         actionDao.delete(actionId)
+        actionDao.closeGap(existing.deviceId, existing.sortOrder)
+    }
+
+    suspend fun reorder(deviceId: String, orderedIds: List<Long>) {
+        orderedIds.forEachIndexed { index, id ->
+            actionDao.updateSortOrder(id, index)
+        }
     }
 
     suspend fun ensureDefaultActions(deviceId: String) {

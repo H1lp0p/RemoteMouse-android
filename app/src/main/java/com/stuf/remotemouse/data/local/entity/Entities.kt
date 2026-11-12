@@ -39,6 +39,8 @@ data class ActionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val deviceId: String,
     val name: String,
+    /** Position in this device's action list. Zero is the top. */
+    val sortOrder: Int = 0,
 )
 
 @Entity(
@@ -59,4 +61,26 @@ data class ActionStepEntity(
     val name: String,
     val stepStringCode: String,
     val sortOrder: Int,
+)
+
+/** One cell of the 2×2 action pad. Slot 0 is top-left, then right, then the next row. */
+const val ACTION_PAD_SLOT_COUNT = 4
+
+@Entity(
+    tableName = "action_pad_slots",
+    primaryKeys = ["deviceId", "slot"],
+    foreignKeys = [
+        ForeignKey(
+            entity = ActionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["actionId"],
+            onDelete = ForeignKey.SET_NULL,
+        ),
+    ],
+    indices = [Index("actionId")],
+)
+data class ActionPadSlotEntity(
+    val deviceId: String,
+    val slot: Int,
+    val actionId: Long?,
 )

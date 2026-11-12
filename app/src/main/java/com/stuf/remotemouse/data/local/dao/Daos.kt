@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.stuf.remotemouse.data.local.entity.ActionEntity
+import com.stuf.remotemouse.data.local.entity.ActionPadSlotEntity
 import com.stuf.remotemouse.data.local.entity.ActionStepEntity
 import com.stuf.remotemouse.data.local.entity.ActionWithSteps
 import com.stuf.remotemouse.data.local.entity.MeEntity
@@ -47,12 +48,24 @@ interface PcDeviceDao {
 
 @Dao
 interface ActionDao {
-    @Query("SELECT * FROM actions WHERE deviceId = :deviceId ORDER BY name ASC")
+    @Query("SELECT * FROM actions WHERE deviceId = :deviceId ORDER BY sortOrder ASC, id ASC")
     fun observeByDevice(deviceId: String): Flow<List<ActionEntity>>
 
     @androidx.room.Transaction
-    @Query("SELECT * FROM actions WHERE deviceId = :deviceId ORDER BY name ASC")
+    @Query("SELECT * FROM actions WHERE deviceId = :deviceId ORDER BY sortOrder ASC, id ASC")
     fun observeByDeviceWithSteps(deviceId: String): Flow<List<ActionWithSteps>>
+
+    @Query("SELECT COALESCE(MAX(sortOrder), -1) FROM actions WHERE deviceId = :deviceId")
+    suspend fun maxSortOrder(deviceId: String): Int
+
+    @Query("UPDATE actions SET sortOrder = :sortOrder WHERE id = :id")
+    suspend fun updateSortOrder(id: Long, sortOrder: Int)
+
+    @Query(
+        "UPDATE actions SET sortOrder = sortOrder - 1 " +
+            "WHERE deviceId = :deviceId AND sortOrder > :removedOrder",
+    )
+    suspend fun closeGap(deviceId: String, removedOrder: Int)
 
     @Query("SELECT COUNT(*) FROM actions WHERE deviceId = :deviceId")
     suspend fun countByDevice(deviceId: String): Int
@@ -86,4 +99,16 @@ interface ActionStepDao {
 
     @Query("DELETE FROM action_steps WHERE id = :id")
     suspend fun delete(id: Long)
+}
+
+@Dao
+interface ActionPadDao {
+    @Query("SELECT * FROM action_pad_slots WHERE deviceId = :deviceId")
+    fun observe(deviceId: String): Flow<List<ActionPadSlotEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(slot: ActionPadSlotEntity)
+
+    @Query("DELETE FROM action_pad_slots WHERE deviceId = :deviceId AND slot = :slot")
+    suspend fun clear(deviceId: String, slot: Int)
 }

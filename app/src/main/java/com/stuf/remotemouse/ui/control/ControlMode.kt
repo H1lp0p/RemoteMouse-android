@@ -5,4 +5,5 @@ enum class ControlMode {
     Stick,
     Player,
     Text,
+    Pad,
 }

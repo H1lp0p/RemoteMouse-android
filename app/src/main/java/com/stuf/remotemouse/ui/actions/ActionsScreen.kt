@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -24,10 +25,17 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -106,7 +114,6 @@ fun ActionsScreen(
                     onMove = viewModel::onMove,
                     onScroll = viewModel::onScroll,
                     onLeftClick = viewModel::leftClick,
-                    onRightClick = viewModel::rightClick,
                 )
                 Text(
                     text = stringResource(R.string.edit_actions),
@@ -119,14 +126,12 @@ fun ActionsScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    actions.forEach { action ->
-                        ActionEditCard(
-                            name = action.name,
-                            keyLabels = action.keyLabels,
-                            onDelete = { viewModel.deleteAction(action.id) },
-                            onEdit = { onEditAction(action.id) },
-                        )
-                    }
+                    ReorderableActionCards(
+                        actions = actions,
+                        onDelete = viewModel::deleteAction,
+                        onEdit = onEditAction,
+                        onReorder = viewModel::reorder,
+                    )
                     TextButton(
                         onClick = onCreateAction,
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
@@ -145,6 +150,137 @@ fun ActionsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ReorderableActionCards(
+    actions: List<ActionEditItem>,
+    onDelete: (Long) -> Unit,
+    onEdit: (Long) -> Unit,
+    onReorder: (List<Long>) -> Unit,
+) {
+    val spacingPx = with(LocalDensity.current) { 16.dp.toPx() }
+    val state = remember(spacingPx) {
+        ActionDragState(spacingPx).also { it.items = actions }
+    }
+    LaunchedEffect(actions) { state.sync(actions) }
+    var pendingDelete by remember { mutableStateOf<ActionEditItem?>(null) }
+    pendingDelete?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(R.string.delete_action)) },
+            text = { Text(stringResource(R.string.delete_action_message, pending.name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        onDelete(pending.id)
+                    },
+                ) {
+                    Text(stringResource(R.string.delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    state.items.forEach { action ->
+        key(action.id) {
+            val dragging = state.draggingId == action.id
+            ActionEditCard(
+                name = action.name,
+                keyLabels = action.keyLabels,
+                dragging = dragging,
+                dragOffsetY = if (dragging) state.dragOffset else 0f,
+                onHeightChanged = { state.heights[action.id] = it },
+                onDragStart = { state.start(action.id) },
+                onDrag = { state.drag(it) },
+                onDragEnd = { state.end(onReorder, actions.map { it.id }) },
+                onDelete = { pendingDelete = action },
+                onEdit = { onEdit(action.id) },
+            )
+        }
+    }
+}
+
+private class ActionDragState(private val spacingPx: Float) {
+    var items by mutableStateOf<List<ActionEditItem>>(emptyList())
+    var draggingId by mutableStateOf<Long?>(null)
+    var dragOffset by mutableFloatStateOf(0f)
+    val heights = mutableMapOf<Long, Int>()
+    private var pending: List<Long>? = null
+
+    fun sync(actions: List<ActionEditItem>) {
+        if (draggingId != null) {
+            val byId = actions.associateBy { it.id }
+            val refreshed = items.mapNotNull { byId[it.id] }
+            if (refreshed.size == items.size) items = refreshed
+            return
+        }
+        val pendingIds = pending
+        if (pendingIds == null || actions.map { it.id } == pendingIds) {
+            pending = null
+            items = actions
+        }
+    }
+
+    fun start(id: Long) {
+        draggingId = id
+        dragOffset = 0f
+    }
+
+    fun drag(dy: Float) {
+        val id = draggingId ?: return
+        val current = items
+        val index = current.indexOfFirst { it.id == id }
+        val height = heights[id]
+        if (index < 0 || height == null || current.any { heights[it.id] == null }) {
+            dragOffset += dy
+            return
+        }
+        dragOffset += dy
+        val topsBefore = tops(current)
+        val target = slot(topsBefore[index] + dragOffset + height / 2f, current)
+        if (target == index) return
+        val moved = current.toMutableList()
+        val item = moved.removeAt(index)
+        moved.add(target, item)
+        dragOffset += topsBefore[index] - tops(moved)[target]
+        items = moved
+    }
+
+    fun end(onReorder: (List<Long>) -> Unit, saved: List<Long>) {
+        val ids = items.map { it.id }
+        draggingId = null
+        dragOffset = 0f
+        if (ids != saved) {
+            pending = ids
+            onReorder(ids)
+        }
+    }
+
+    private fun tops(list: List<ActionEditItem>): List<Float> {
+        var y = 0f
+        return list.map { item ->
+            val top = y
+            y += (heights[item.id] ?: 0) + spacingPx
+            top
+        }
+    }
+
+    private fun slot(center: Float, list: List<ActionEditItem>): Int {
+        var y = 0f
+        list.forEachIndexed { index, item ->
+            val height = heights[item.id]?.toFloat() ?: return index
+            if (center < y + height + spacingPx / 2f) return index
+            y += height + spacingPx
+        }
+        return list.lastIndex.coerceAtLeast(0)
     }
 }
 
@@ -208,7 +344,6 @@ private fun SensitivityBlock(
     onMove: (Float, Float) -> Unit,
     onScroll: (Float) -> Unit,
     onLeftClick: () -> Unit,
-    onRightClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -239,7 +374,6 @@ private fun SensitivityBlock(
         onMove = onMove,
         onScroll = onScroll,
         onLeftClick = onLeftClick,
-        onRightClick = onRightClick,
         modifier = Modifier
             .fillMaxWidth()
             .height(180.dp),

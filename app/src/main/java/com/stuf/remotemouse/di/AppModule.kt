@@ -4,7 +4,10 @@ import android.content.Context
 import androidx.room.Room
 import com.stuf.remotemouse.data.local.AppDatabase
 import com.stuf.remotemouse.data.local.MIGRATION_2_3
+import com.stuf.remotemouse.data.local.MIGRATION_3_4
+import com.stuf.remotemouse.data.local.MIGRATION_4_5
 import com.stuf.remotemouse.data.local.dao.ActionDao
+import com.stuf.remotemouse.data.local.dao.ActionPadDao
 import com.stuf.remotemouse.data.local.dao.ActionStepDao
 import com.stuf.remotemouse.data.local.dao.MeDao
 import com.stuf.remotemouse.data.local.dao.PcDeviceDao
@@ -29,7 +32,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "remote_mouse.db")
-            .addMigrations(MIGRATION_2_3)
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .fallbackToDestructiveMigration(true)
             .build()
 
@@ -44,6 +47,9 @@ object AppModule {
 
     @Provides
     fun provideActionStepDao(db: AppDatabase): ActionStepDao = db.actionStepDao()
+
+    @Provides
+    fun provideActionPadDao(db: AppDatabase): ActionPadDao = db.actionPadDao()
 
     @Provides
     @Singleton

@@ -2,6 +2,7 @@ package com.stuf.remotemouse.ui.control
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stuf.remotemouse.data.local.entity.ACTION_PAD_SLOT_COUNT
 import com.stuf.remotemouse.data.local.repo.ActionRepository
 import com.stuf.remotemouse.data.remote.ConnectionOrchestrator
 import com.stuf.remotemouse.data.remote.ServerEvent
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -26,6 +28,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+data class PadSlot(
+    val actionId: Long? = null,
+    val name: String? = null,
+)
 
 data class ControlUiState(
     val mode: ControlMode = ControlMode.Mouse,
@@ -71,6 +78,26 @@ class ControlViewModel @Inject constructor(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val padSlots: StateFlow<List<PadSlot>> = session
+        .map { it?.deviceId }
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(emptyPad())
+            } else {
+                combine(
+                    actionRepository.observeActions(id),
+                    actionRepository.observePadSlots(id),
+                ) { actionList, slots ->
+                    val names = actionList.associate { it.id to it.name }
+                    slots.map { actionId ->
+                        val name = actionId?.let(names::get)
+                        if (name == null) PadSlot() else PadSlot(actionId, name)
+                    }
+                }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyPad())
 
     private val sensitivity = cursorSensitivity.coefficient
 
@@ -138,7 +165,6 @@ class ControlViewModel @Inject constructor(
     }
 
     private fun subscribeMedia() {
-        if (mediaSubscribed) return
         mediaSubscribed = true
         orchestrator.socket().mediaSubscribe()
         syncMediaProgressTicker()
@@ -356,6 +382,16 @@ class ControlViewModel @Inject constructor(
         }
     }
 
+    fun assignPadSlot(slot: Int, actionId: Long) {
+        val deviceId = session.value?.deviceId ?: return
+        viewModelScope.launch { actionRepository.setPadSlot(deviceId, slot, actionId) }
+    }
+
+    fun clearPadSlot(slot: Int) {
+        val deviceId = session.value?.deviceId ?: return
+        viewModelScope.launch { actionRepository.setPadSlot(deviceId, slot, null) }
+    }
+
     fun runAction(actionId: Long) {
         viewModelScope.launch {
             val withSteps = actionRepository.getActionWithSteps(actionId) ?: return@launch
@@ -370,6 +406,10 @@ class ControlViewModel @Inject constructor(
 
     fun ensureConnection() {
         orchestrator.ensureSocketConnected()
+        if (_ui.value.mode == ControlMode.Player) {
+            mediaSubscribed = true
+            orchestrator.socket().mediaSubscribe()
+        }
     }
 
     fun disconnect() {
@@ -388,6 +428,8 @@ class ControlViewModel @Inject constructor(
         }
         _ui.update { it.copy(leftHeld = false, rightHeld = false) }
     }
+
+    private fun emptyPad(): List<PadSlot> = List(ACTION_PAD_SLOT_COUNT) { PadSlot() }
 
     override fun onCleared() {
         unsubscribeMedia()

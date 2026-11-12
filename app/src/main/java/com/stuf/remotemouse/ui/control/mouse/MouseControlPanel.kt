@@ -64,7 +64,6 @@ fun MouseControlPanel(
             onMove = onMove,
             onScroll = onScroll,
             onLeftClick = onLeftClick,
-            onRightClick = onRightClick,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -111,7 +110,6 @@ fun TouchpadSurface(
     onMove: (Float, Float) -> Unit,
     onScroll: (Float) -> Unit,
     onLeftClick: () -> Unit,
-    onRightClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -128,7 +126,6 @@ fun TouchpadSurface(
                     onMove = onMove,
                     onScroll = onScroll,
                     onLeftClick = onLeftClick,
-                    onRightClick = onRightClick,
                 ),
             contentAlignment = Alignment.Center,
         ) {

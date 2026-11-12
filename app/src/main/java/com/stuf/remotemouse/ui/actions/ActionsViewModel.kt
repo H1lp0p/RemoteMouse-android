@@ -95,6 +95,11 @@ class ActionsViewModel @Inject constructor(
         viewModelScope.launch { actionRepository.deleteAction(actionId) }
     }
 
+    fun reorder(ids: List<Long>) {
+        val device = deviceId.value ?: return
+        viewModelScope.launch { actionRepository.reorder(device, ids) }
+    }
+
     fun setSensitivity(value: Float) {
         cursorSensitivity.setLocal(value)
     }

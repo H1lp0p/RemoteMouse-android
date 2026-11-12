@@ -31,22 +31,28 @@
     <string name="device_settings">Device settings</string>
     <string name="add_new">Add new</string>
     <string name="delete_action">Delete action</string>
+    <string name="delete_action_message">Delete %1$s?</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="reorder_action">Reorder action</string>
     <string name="actions_connect_first">Connect to a PC first. Actions are per device.</string>
     <string name="actions">Actions</string>
     <string name="play_action">Play action</string>
+    <string name="choose_action">Choose action</string>
     <string name="edit">Edit</string>
     <string name="no_actions">No actions yet</string>
     <string name="volume">Volume</string>
     <string name="run_action">Run action</string>
     <string name="lmb">LMB</string>
     <string name="rmb">RMB</string>
-    <string name="touchpad_hints">Swipe = move\nHold + swipe = scroll\nSingle tap = LMB\nDouble tap = RMB</string>
+    <string name="touchpad_hints">Swipe = move\nHold + swipe = scroll\nTap = LMB</string>
     <string name="stick_hint_top">Swipe = move\nHold + swipe = scroll</string>
     <string name="stick_hint_bottom">Single tap = LMB\nDouble tap = RMB</string>
     <string name="control_mode_mouse">Mouse</string>
     <string name="control_mode_stick">Stick</string>
     <string name="control_mode_player">Player</string>
     <string name="control_mode_text">Text</string>
+    <string name="control_mode_pad">Pad</string>
     <string name="control_mode_coming_soon">%1$s — soon</string>
     <string name="media_no_data">//No Data//</string>
     <string name="media_by_artist">By %1$s</string>
